@@ -38,15 +38,36 @@
       el('path', { d: GEO.graticule, class: 'graticule' }, svg);
       const gShelf = el('g', { filter: 'url(#shadow)' }, svg);
       const gCont = el('g', {}, svg);
-      const gRoutes = el('g', {}, svg);
       const gLand = el('g', {}, svg);
+      const gRoutes = el('g', { class: 'routes' }, svg); // above the land so routes over land stay visible
       const gLabels = el('g', { class: 'labels' }, svg);
       const gBadges = el('g', {}, svg);
       this.gFx = el('g', { class: 'fx' }, svg);
       this.gCursors = el('g', { class: 'cursors' }, svg);
       this.cursors = {};
 
-      for (const [a, b, c, d] of GEO.seaRoutes) el('path', { class: 'sea-route', d: `M${a},${b}L${c},${d}` }, gRoutes);
+      // Sea routes: dotted lines (with a dark casing so they read over sea and land) and a dot at each end.
+      this.routes = [];
+      for (const [, , , , a, b, wrap] of GEO.seaRoutes) {
+        const g = el('g', { class: 'route' + (wrap ? ' wrap' : '') }, gRoutes);
+        // badge-to-badge, like a classic board, trimmed so the line meets the edge of each badge
+        const [ax, ay] = GEO.points[a];
+        let [bx, by] = wrap ? [wrap === 'wrapW' ? 0 : W, ay] : GEO.points[b];
+        const len = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / len, uy = (by - ay) / len;
+        const x1 = ax + ux * 14, y1 = ay + uy * 14;
+        const x2 = wrap ? bx : bx - ux * 14, y2 = wrap ? by : by - uy * 14;
+        const d = `M${x1.toFixed(1)},${y1.toFixed(1)}L${x2.toFixed(1)},${y2.toFixed(1)}`;
+        el('path', { class: 'sea-route-casing', d }, g);
+        el('path', { class: 'sea-route', d }, g);
+        if (wrap) {
+          // Alaska <-> Kamchatka wraps around the edge of the map: arrow + label at the edge
+          const left = x2 === 0, ax2 = left ? 3 : W - 3;
+          el('path', { class: 'route-arrow', d: left ? `M${ax2 + 7},${y2 - 6} L${ax2},${y2} L${ax2 + 7},${y2 + 6}` : `M${ax2 - 7},${y2 - 6} L${ax2},${y2} L${ax2 - 7},${y2 + 6}` }, g);
+          const t = el('text', { class: 'route-label', x: left ? 6 : W - 6, y: y2 - 10, 'text-anchor': left ? 'start' : 'end' }, g);
+          t.textContent = left ? 'to Kamchatka' : 'to Alaska';
+        }
+        this.routes.push({ g, a, b });
+      }
 
       this.shelves = {};
       for (const t of Object.values(MAP.territories)) {
@@ -72,7 +93,8 @@
         for (const target of [path, badge]) {
           target.addEventListener('click', () => handlers.onClick(t.id));
           target.addEventListener('mousemove', (e) => handlers.onHover(t.id, e));
-          target.addEventListener('mouseleave', () => handlers.onHover(null));
+          target.addEventListener('mouseenter', () => this.setHover(t.id));
+          target.addEventListener('mouseleave', () => { handlers.onHover(null); if (this.hoverId === t.id) this.setHover(null); });
         }
         this.nodes[t.id] = { path, circle, ring, text, star, badge, pop, tag, x, y, armies: null };
       }
@@ -262,6 +284,8 @@
         // keep selected shapes on top so their outline is visible
         if (ui.sel === id || ui.target === id) n.path.parentNode.appendChild(n.path);
       }
+      this.ui = ui;
+      this.highlightRoutes();
       // continent control: tint the shelf and name the holder
       for (const [c, ids] of Object.entries(MAP.continentTerritories)) {
         const owner = view.territories[ids[0]].owner;
@@ -277,6 +301,13 @@
         }
       }
     },
+
+    // Light up the sea routes of the selected territory (or the one under the pointer).
+    highlightRoutes() {
+      const focus = new Set([this.ui && this.ui.sel, this.hoverId].filter(Boolean));
+      for (const r of this.routes || []) r.g.classList.toggle('lit', focus.has(r.a) || focus.has(r.b));
+    },
+    setHover(id) { this.hoverId = id; this.highlightRoutes(); },
 
     // ---- animations ----
     // events come from the server: {type:'place'|'battle'|'move', ...}

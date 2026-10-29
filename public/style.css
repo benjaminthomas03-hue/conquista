@@ -180,7 +180,18 @@ input::placeholder { color: #6f8c8a; }
 .terr.flash { animation: flash .9s ease-out; }
 @keyframes march { to { stroke-dashoffset: -18; } }
 @keyframes flash { 0% { filter: brightness(2); } 100% { filter: brightness(1); } }
-.sea-route { vector-effect: non-scaling-stroke; stroke: rgba(225, 240, 236, .35); stroke-width: 1.4; stroke-dasharray: 4 5; fill: none; }
+.sea-route { vector-effect: non-scaling-stroke; stroke: rgba(244, 236, 214, .9); stroke-width: 2; stroke-dasharray: 5 5; stroke-linecap: round; fill: none; }
+.sea-route-casing { vector-effect: non-scaling-stroke; stroke: rgba(6, 22, 27, .7); stroke-width: 4.5; stroke-linecap: round; fill: none; }
+.route-end { fill: rgba(244, 236, 214, .95); stroke: rgba(6, 22, 27, .7); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.route-arrow { fill: none; stroke: rgba(244, 236, 214, .95); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.route-label { font-family: var(--body); font-style: italic; font-size: 10px; fill: rgba(244, 236, 214, .9); paint-order: stroke; stroke: rgba(6, 22, 27, .8); stroke-width: 2.5px; pointer-events: none; }
+.route { transition: opacity .15s; }
+.route.lit .sea-route { stroke: var(--brass-hi); stroke-width: 3; }
+.route.lit .sea-route-casing { stroke-width: 6; }
+.route.lit .route-end, .route.lit .route-arrow { fill: var(--brass-hi); stroke: var(--brass-hi); }
+.route.lit .route-label { fill: var(--brass-hi); }
+@media (prefers-reduced-motion: no-preference) { .route.lit .sea-route { animation: route-march .7s linear infinite; } }
+@keyframes route-march { to { stroke-dashoffset: -10; } }
 /* troop badges: owner-coloured, sized by troop count (set in board.js) */
 .badge .disc { stroke: #0b1f24; stroke-width: 2.5; }
 .badge.clickable { cursor: pointer; }
@@ -430,3 +441,4 @@ input::placeholder { color: #6f8c8a; }
 .diplo-panel .offer > span { flex: 1; min-width: 0; }
 
 .botspeed-select { width: auto; padding: 5px 8px; font-size: 13px; background: transparent; border: 1px solid var(--line); border-radius: 8px; }
+.routes { pointer-events: none; }

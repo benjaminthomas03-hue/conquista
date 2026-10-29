@@ -16,7 +16,7 @@ const MAP = require('../shared/map');
 const C = {
   // North America
   'Greenland': 'greenland',
-  'Canada': [['nwt', [-141, 60, -50, 84]], ['alberta', [-141, 40, -102, 60]], ['ontario', [-102, 40, -79.5, 60]], ['quebec', [-79.5, 40, -50, 60]]],
+  'Canada': [['nwt', [-141, 60, -79.5, 84]], ['alberta', [-141, 40, -102, 60]], ['ontario', [-102, 40, -79.5, 60]], ['quebec', [-79.5, 40, -50, 60]]],
   'United States of America': [['alaska', [-169, 50, -129, 75]], ['westernUS', [-125, 24, -100, 50]], ['easternUS', [-100, 24, -66, 50]]],
   'St. Pierre and Miquelon': 'quebec',
   ...Object.fromEntries(['Mexico', 'Guatemala', 'Belize', 'Honduras', 'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama',
@@ -38,8 +38,8 @@ const C = {
   ...Object.fromEntries(['Ukraine', 'Belarus', 'Moldova', 'Estonia', 'Latvia', 'Lithuania'].map((n) => [n, 'ukraine'])),
   'Russia': [
     ['ukraine', [19, 35, 60, 82]], ['ural', [60, 35, 75, 82]], ['siberia', [75, 35, 100, 82]],
-    ['irkutsk', [100, 35, 135, 58]], ['yakutsk', [100, 58, 150, 82]],
-    ['kamchatka', [135, 35, 150, 58]], ['kamchatka', [150, 35, 192, 82]],
+    ['irkutsk', [100, 35, 130, 58]], ['yakutsk', [100, 58, 150, 82]],
+    ['kamchatka', [130, 35, 150, 58]], ['kamchatka', [150, 35, 192, 82]],
   ],
   // Africa
   ...Object.fromEntries(['Morocco', 'W. Sahara', 'Algeria', 'Tunisia', 'Mauritania', 'Mali', 'Niger', 'Chad', 'Senegal', 'Gambia', 'Guinea',
@@ -53,9 +53,14 @@ const C = {
   // Asia
   ...Object.fromEntries(['Turkey', 'Syria', 'Iraq', 'Iran', 'Saudi Arabia', 'Yemen', 'Oman', 'United Arab Emirates', 'Qatar', 'Bahrain', 'Kuwait',
     'Jordan', 'Israel', 'Palestine', 'Lebanon', 'Cyprus', 'N. Cyprus', 'Georgia', 'Armenia', 'Azerbaijan'].map((n) => [n, 'middleEast'])),
-  ...Object.fromEntries(['Afghanistan', 'Turkmenistan', 'Uzbekistan', 'Tajikistan', 'Kyrgyzstan', 'Kazakhstan'].map((n) => [n, 'afghanistan'])),
+  ...Object.fromEntries(['Afghanistan', 'Turkmenistan', 'Uzbekistan', 'Tajikistan', 'Kyrgyzstan'].map((n) => [n, 'afghanistan'])),
+  // northern Kazakhstan joins Ural so Ural really borders China (as the classic board connects them)
+  'Kazakhstan': [['ural', [56, 47, 88, 56]], ['afghanistan', [46, 35, 56, 56]], ['afghanistan', [56, 35, 88, 47]]],
   ...Object.fromEntries(['India', 'Pakistan', 'Nepal', 'Bhutan', 'Bangladesh', 'Sri Lanka', 'Siachen Glacier'].map((n) => [n, 'india'])),
-  ...Object.fromEntries(['China', 'Taiwan', 'North Korea', 'South Korea', 'Hong Kong', 'Macao'].map((n) => [n, 'china'])),
+  // Manchuria and Korea join Mongolia so it reaches the coast facing Japan (as on the classic board)
+  'China': [['china', [73, 15, 118.5, 54]], ['china', [118.5, 15, 136, 38.5]], ['mongolia', [118.5, 38.5, 136, 54]]],
+  ...Object.fromEntries(['Taiwan', 'Hong Kong', 'Macao'].map((n) => [n, 'china'])),
+  ...Object.fromEntries(['North Korea', 'South Korea'].map((n) => [n, 'mongolia'])),
   'Mongolia': 'mongolia',
   'Japan': 'japan',
   ...Object.fromEntries(['Myanmar', 'Thailand', 'Laos', 'Cambodia', 'Vietnam', 'Singapore'].map((n) => [n, 'siam'])),
@@ -116,6 +121,13 @@ for (const f of feature(simple, simple.objects.countries).features) {
     const clipped = pc.intersection(geom, box(b));
     if (clipped.length) (parts[tid] = parts[tid] || []).push(clipped);
   }
+  // North-east Canada above 60°N: the mainland tip (Ungava) stays with Quebec, the Arctic islands go to NWT
+  if (f.properties.name === 'Canada') {
+    for (const poly of pc.intersection(geom, box([-79.5, 60, -50, 84]))) {
+      const touchesCut = poly[0].some(([, y]) => Math.abs(y - 60) < 1e-6);
+      (parts[touchesCut ? 'quebec' : 'nwt'] = parts[touchesCut ? 'quebec' : 'nwt'] || []).push([poly]);
+    }
+  }
 }
 const missing = Object.keys(MAP.territories).filter((t) => !parts[t]);
 if (missing.length) throw new Error('Territories without land: ' + missing.join(', '));
@@ -167,23 +179,31 @@ for (const [tid, polys] of Object.entries(projRings)) {
 
 // Sea routes: adjacent territories whose shapes don't share a border get a dashed line between closest coasts.
 function closest(a, b) {
+  // distance between two territories' outlines, measured point-to-segment so long straight
+  // borders (e.g. the 49th parallel) count as touching
+  const segs = (rings) => { const out = []; for (const poly of rings) for (const ring of poly) for (let i = 0; i < ring.length - 1; i++) out.push([ring[i], ring[i + 1]]); return out; };
+  const ptSeg = (p, [u, v]) => {
+    const dx = v[0] - u[0], dy = v[1] - u[1], L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / L)) : 0;
+    const q = [u[0] + t * dx, u[1] + t * dy];
+    return [Math.hypot(p[0] - q[0], p[1] - q[1]), q];
+  };
   let best = [Infinity];
-  const A = projRings[a].flat(2), B = projRings[b].flat(2);
-  for (let i = 0; i < A.length; i += 1) for (let j = 0; j < B.length; j += 1) {
-    const d = (A[i][0] - B[j][0]) ** 2 + (A[i][1] - B[j][1]) ** 2;
-    if (d < best[0]) best = [d, A[i], B[j]];
-  }
-  return [Math.sqrt(best[0]), best[1], best[2]];
+  const A = projRings[a].flat(2), B = projRings[b].flat(2), SA = segs(projRings[a]), SB = segs(projRings[b]);
+  for (const p of A) for (const sg of SB) { const [d, q] = ptSeg(p, sg); if (d < best[0]) best = [d, p, q]; }
+  for (const p of B) for (const sg of SA) { const [d, q] = ptSeg(p, sg); if (d < best[0]) best = [d, q, p]; }
+  return best;
 }
 for (const [a, b] of MAP.edges) {
   if ((a === 'alaska' && b === 'kamchatka') || (a === 'kamchatka' && b === 'alaska')) {
     const al = projRings.alaska.flat(2).reduce((m, p) => (p[0] < m[0] ? p : m));
     const ka = projRings.kamchatka.flat(2).reduce((m, p) => (p[0] > m[0] ? p : m));
-    out.seaRoutes.push([al[0], al[1], 0, al[1]], [ka[0], ka[1], W, ka[1]]);
+    const r1 = (v) => Math.round(v * 10) / 10;
+    out.seaRoutes.push([r1(al[0]), r1(al[1]), 0, r1(al[1]), 'alaska', 'kamchatka', 'wrapW'], [r1(ka[0]), r1(ka[1]), W, r1(ka[1]), 'kamchatka', 'alaska', 'wrapE']);
     continue;
   }
   const [d, p, q] = closest(a, b);
-  if (d > 1.2) out.seaRoutes.push([p[0], p[1], q[0], q[1]].map((v) => Math.round(v * 10) / 10));
+  if (d > 1.2) out.seaRoutes.push([...[p[0], p[1], q[0], q[1]].map((v) => Math.round(v * 10) / 10), a, b]);
 }
 out.graticule = pathGen(d3.geoGraticule().step([20, 20]).extentMinor([[-180, -60], [180, 80]])());
 
@@ -194,3 +214,20 @@ if (typeof module === 'object' && module.exports) module.exports = GEO; else roo
 fs.writeFileSync(path.join(__dirname, '..', 'shared', 'map-geo.js'), js);
 console.log(`Wrote shared/map-geo.js: ${W}x${H}, ${(js.length / 1024).toFixed(0)} KB, ${out.seaRoutes.length} sea routes`);
 console.log('Stray islands removed:', islandReport.join(', '));
+
+// Consistency check: territories that visibly share a border must be connected in the rules.
+{
+  const bboxes = Object.fromEntries(Object.entries(projRings).map(([t, polys]) => {
+    const pts = polys.flat(2); const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    return [t, [Math.min(...xs) - 2, Math.min(...ys) - 2, Math.max(...xs) + 2, Math.max(...ys) + 2]];
+  }));
+  const overlap = (a, b) => !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1]);
+  const edgeSet = new Set(MAP.edges.map(([a, b]) => [a, b].sort().join('|')));
+  const ids = Object.keys(projRings), bad = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+    const a = ids[i], b = ids[j];
+    if (edgeSet.has([a, b].sort().join('|')) || !overlap(bboxes[a], bboxes[b])) continue;
+    if (closest(a, b)[0] < 1.2) bad.push(`${a}-${b}`);
+  }
+  console.log(bad.length ? 'WARNING: touching but not connected: ' + bad.join(', ') : 'Check passed: every shared border is a real connection');
+}

@@ -213,7 +213,11 @@
         else toast(T(id).armies < 2 ? 'You need at least 2 armies to attack from there' : 'No enemies next to that territory', true);
       } else if (u.sel && MAP.territories[u.sel].neighbors.includes(id)) {
         u.target = id;
-      } else if (u.sel) toast('That territory is not next to your selection', true);
+      } else if (u.sel) {
+        const names = (ids) => ids.map((n) => MAP.territories[n].name);
+        const list = (arr) => (arr.length > 1 ? arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1] : arr[0]);
+        toast(`${MAP.territories[id].name} isn't connected to ${MAP.territories[u.sel].name}. It connects to ${list(names(MAP.territories[id].neighbors))}. Dotted lines show sea routes.`, true);
+      }
       renderGame();
       return;
     }
