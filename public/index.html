@@ -59,26 +59,28 @@
         <fieldset id="lobby-settings" class="settings">
           <div class="field">
             <span>Victory</span>
-            <div class="seg seg-3" id="seg-mode">
-              <button data-v="domination" title="Conquer all 42 territories">World domination</button>
-              <button data-v="missions" title="Each player gets a hidden objective">Secret missions</button>
-              <button data-v="capitals" title="Everyone picks a capital; hold every capital to win">Capitals</button>
+            <div class="choice-list" id="seg-mode" role="radiogroup" aria-label="Victory">
+              <button data-v="domination" role="radio"><i class="radio"></i><span class="choice-text"><b>World domination</b><small>Conquer all 42 territories</small></span></button>
+              <button data-v="missions" role="radio"><i class="radio"></i><span class="choice-text"><b>Secret missions</b><small>Each player gets a hidden objective</small></span></button>
+              <button data-v="capitals" role="radio"><i class="radio"></i><span class="choice-text"><b>Capitals</b><small>Everyone picks a capital; hold them all to win</small></span></button>
             </div>
           </div>
           <div class="settings-grid">
             <div class="field">
               <span>Starting territories</span>
-              <div class="seg" id="seg-start">
-                <button data-v="random">Random deal</button>
-                <button data-v="draft">Draft</button>
+              <div class="seg" id="seg-start" role="radiogroup" aria-label="Starting territories">
+                <button data-v="random" role="radio">Random</button>
+                <button data-v="draft" role="radio">Draft</button>
               </div>
+              <small class="field-hint" id="hint-start"></small>
             </div>
             <div class="field">
               <span>Card sets</span>
-              <div class="seg" id="seg-cards">
-                <button data-v="escalating" title="4, 6, 8, 10, 12, 15, then +5 each trade">Escalating</button>
-                <button data-v="fixed" title="Infantry 4, cavalry 6, artillery 8, mixed 10">Fixed</button>
+              <div class="seg" id="seg-cards" role="radiogroup" aria-label="Card sets">
+                <button data-v="escalating" role="radio">Escalating</button>
+                <button data-v="fixed" role="radio">Fixed</button>
               </div>
+              <small class="field-hint" id="hint-cards"></small>
             </div>
           </div>
           <div class="settings-grid">

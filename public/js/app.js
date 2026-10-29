@@ -156,8 +156,10 @@
     $('lobby-settings').disabled = !host;
     const st = r.settings;
     for (const [id, key] of [['seg-mode', 'mode'], ['seg-start', 'start'], ['seg-cards', 'cards']]) {
-      $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === st[key]));
+      $(id).querySelectorAll('button').forEach((b) => { const on = b.dataset.v === st[key]; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
     }
+    $('hint-start').textContent = st.start === 'draft' ? 'Players take turns claiming territories' : 'Territories are dealt out at random';
+    $('hint-cards').textContent = st.cards === 'fixed' ? 'Sets are worth 4, 6, 8 or 10' : 'Each set is worth more: 4, 6, 8, 10…';
     $('chk-fog').checked = !!st.fog;
     $('sel-timer').value = String(st.timer);
     $('btn-start').hidden = !host;
