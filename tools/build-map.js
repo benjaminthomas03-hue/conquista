@@ -75,7 +75,15 @@ const C = {
 // Whole-country assignments are clipped to their continent's box to drop far-flung overseas islands.
 const CONTINENT_BOX = { NA: [-169, 7, -10, 84], SA: [-82, -56, -30, 13], EU: [-25, 34, 62, 82], AF: [-18, -36, 55, 38], AS: [25, -12, 180, 82], AU: [94, -48, 180, 8] };
 
-const box = ([x0, y0, x1, y1]) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]];
+// Cut boxes are densified (a point every 0.5°) so a straight cut, e.g. along 58°N, is drawn as the same
+// line on both sides; otherwise long edges are drawn as great-circle arcs that bulge differently and leave slivers.
+function box([x0, y0, x1, y1]) {
+  const pts = [], step = 0.5;
+  const seg = (ax, ay, bx, by) => { const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / step)); for (let i = 0; i < n; i++) pts.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n]); };
+  seg(x0, y0, x1, y0); seg(x1, y0, x1, y1); seg(x1, y1, x0, y1); seg(x0, y1, x0, y0);
+  pts.push([x0, y0]);
+  return [pts];
+}
 const toMulti = (g) => (g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
 // Drop stray islands: keep the main landmass, big islands, and small islands only when they hug the coast.
 const ISLAND_BIG = 0.12, ISLAND_MIN = 0.01, ISLAND_NEAR_DEG = 1.2;
@@ -143,6 +151,18 @@ for (const [tid, list] of Object.entries(parts)) {
   const pr = pruneIslands(merged);
   if (pr.dropped) islandReport.push(`${tid} -${pr.dropped}`);
   merged = pr.kept;
+  // Densify long straight edges (polygon-clipping drops collinear points) so cut lines along a parallel
+  // stay on that parallel instead of being drawn as bulging great-circle arcs.
+  merged = merged.map((poly) => poly.map((ring) => {
+    const out = [];
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [ax, ay] = ring[i], [bx, by] = ring[i + 1];
+      const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / 0.5));
+      for (let k = 0; k < n; k++) out.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n]);
+    }
+    out.push(ring[ring.length - 1]);
+    return out;
+  }));
   // polygon-clipping winds outer rings counter-clockwise; d3-geo (spherical) expects clockwise
   merged = merged.map((poly) => poly.map((ring) => ring.slice().reverse()));
   shapes[tid] = { type: 'MultiPolygon', coordinates: merged };
@@ -230,4 +250,10 @@ console.log('Stray islands removed:', islandReport.join(', '));
     if (closest(a, b)[0] < 1.2) bad.push(`${a}-${b}`);
   }
   console.log(bad.length ? 'WARNING: touching but not connected: ' + bad.join(', ') : 'Check passed: every shared border is a real connection');
+}
+if (process.env.DEBUG_PT) {
+  for (const [lon, lat] of JSON.parse(process.env.DEBUG_PT)) {
+    const hit = Object.entries(shapes).filter(([, g]) => d3.geoContains(g, [lon, lat])).map(([t]) => t);
+    console.log(`(${lon}, ${lat}) -> ${hit.join(',') || 'nothing'}  board ${projection([lon, lat]).map((v) => v.toFixed(1))}`);
+  }
 }
