@@ -15,7 +15,11 @@
     return e;
   }
   // Badge radius grows with troop count so strongholds stand out at a glance.
-  const radiusFor = (armies) => Math.min(22, 11 + 3 * Math.log2(Math.max(1, armies)));
+  const radiusFor = () => 16; // approximate marker radius, used to place floating numbers
+  const FIGS = window.CONQUISTA_FIGURES || {};
+  const FEET = 9;                                // figure stands with its base this far below the territory point
+  const FIG_H = { inf: 42, cav: 45, art: 28 };   // on-screen heights at full view
+  const figKind = (armies) => (armies >= 10 ? 'art' : armies >= 5 ? 'cav' : 'inf');
   function textColorFor(hex) {
     const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -34,6 +38,20 @@
       el('feDropShadow', { dx: 0, dy: 1.5, stdDeviation: 2.5, 'flood-color': '#04161b', 'flood-opacity': 0.6 }, f);
       const bf = el('filter', { id: 'badge-shadow', x: '-50%', y: '-50%', width: '200%', height: '200%' }, defs);
       el('feDropShadow', { dx: 0, dy: 1, stdDeviation: 1.2, 'flood-color': '#000', 'flood-opacity': 0.55 }, bf);
+      // aged-paper texture: soft relief + paper grain + faint stains, multiplied over the land (static, so drawn once)
+      defs.insertAdjacentHTML('beforeend', `
+        <filter id="paper" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="5" seed="8" result="h"/>
+          <feDiffuseLighting in="h" surfaceScale="5" lighting-color="#fff8ec" result="light"><feDistantLight azimuth="225" elevation="48"/></feDiffuseLighting>
+          <feComponentTransfer in="light" result="relief"><feFuncR type="linear" slope=".18" intercept=".88"/><feFuncG type="linear" slope=".18" intercept=".87"/><feFuncB type="linear" slope=".18" intercept=".84"/></feComponentTransfer>
+          <feTurbulence type="fractalNoise" baseFrequency=".004" numOctaves="3" seed="21" result="st"/>
+          <feColorMatrix in="st" type="matrix" values="0 0 0 0 .62  0 0 0 0 .5  0 0 0 0 .32  1.1 0 0 0 -.5" result="stains"/>
+          <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="2" result="grain"/>
+          <feColorMatrix in="grain" values="0 0 0 0 .3  0 0 0 0 .22  0 0 0 0 .12  0 0 0 .16 0" result="grainC"/>
+          <feMerge result="m"><feMergeNode in="relief"/><feMergeNode in="stains"/><feMergeNode in="grainC"/></feMerge>
+          <feComposite in="m" in2="SourceAlpha" operator="in"/>
+        </filter>
+        <radialGradient id="figShadowG"><stop offset="0" stop-color="#1c1006" stop-opacity=".5"/><stop offset="1" stop-color="#1c1006" stop-opacity="0"/></radialGradient>`);
 
       el('rect', { class: 'ocean', x: 0, y: 0, width: W, height: H }, svg);
       el('path', { d: GEO.graticule, class: 'graticule' }, svg);
@@ -82,13 +100,17 @@
         const [x, y] = GEO.points[t.id];
         const [lx, ly] = (GEO.labelOffsets && GEO.labelOffsets[t.id]) || [0, 21];
         const tag = el('g', { transform: `translate(${x},${y})` }, gLabels);
-        const label = el('text', { x: lx, y: ly + 3, class: 'tlabel' }, tag);
+        const label = el('text', { x: lx, y: Math.max(ly, 21) + 3, class: 'tlabel' }, tag); // names sit below the figure
         label.textContent = t.name;
         const badge = el('g', { class: 'badge', transform: `translate(${x},${y})` }, gBadges);
         const pop = el('g', { class: 'pop' }, badge);
-        const ring = el('circle', { class: 'threat-ring', r: 16 }, pop);
-        const circle = el('circle', { class: 'disc', r: 12, filter: 'url(#badge-shadow)' }, pop);
-        const text = el('text', {}, pop);
+        // army marker: a figure (infantry 1-4, horseman 5-9, cannon 10+) with the count on a plaque
+        const ring = el('ellipse', { class: 'threat-ring', cx: 0, cy: FEET, rx: 16, ry: 6 }, pop);
+        el('ellipse', { class: 'fig-shadow', cx: 0, cy: FEET - 0.5, rx: 11, ry: 3.4, fill: 'url(#figShadowG)' }, pop);
+        const circle = el('circle', { class: 'disc', r: 7, filter: 'url(#badge-shadow)' }, pop); // only for unclaimed (draft)
+        const fig = el('image', { class: 'fig', preserveAspectRatio: 'xMidYMax meet' }, pop);
+        const plaque = el('rect', { class: 'plaque', rx: 7, height: 14 }, pop);
+        const text = el('text', { class: 'count' }, pop);
         // capital marker (capitals mode): a star pinned to the badge
         const star = el('path', { class: 'capital-star', d: 'M0,-7 L2,-2.2 L7,-2.2 L3,1 L4.4,6 L0,3 L-4.4,6 L-3,1 L-7,-2.2 L-2,-2.2 Z' }, pop);
         // the badge is clickable too, which makes small islands (Iceland, Japan…) easy to hit
@@ -98,8 +120,12 @@
           target.addEventListener('mouseenter', () => this.setHover(t.id));
           target.addEventListener('mouseleave', () => { handlers.onHover(null); if (this.hoverId === t.id) this.setHover(null); });
         }
-        this.nodes[t.id] = { path, circle, ring, text, star, badge, pop, tag, x, y, armies: null };
+        this.nodes[t.id] = { path, circle, ring, text, star, badge, pop, tag, x, y, fig, plaque, armies: null, figKey: null };
       }
+
+      // one static texture layer over all the land (cheaper than filtering each territory)
+      const paper = el('path', { d: Object.values(GEO.paths).join(''), class: 'paper', fill: '#fff', filter: 'url(#paper)' });
+      gLand.parentNode.insertBefore(paper, gRoutes);
 
       this.contLabels = {};
       for (const [c, [x, y]] of Object.entries(GEO.continentLabels || {})) {
@@ -256,22 +282,39 @@
         const unclaimed = !s.owner;                 // draft: nobody has picked it yet
         const fogged = s.armies == null && !unclaimed; // fog of war: owner known, troops hidden
         const color = unclaimed ? '#55696d' : colors[s.owner] || '#777';
-        // badge: owner-coloured disc, sized by troop count
-        const r = unclaimed ? 7 : radiusFor(fogged ? 1 : s.armies);
-        n.circle.setAttribute('r', r.toFixed(1));
+        // marker: figure by army size (infantry 1-4, horseman 5-9, cannon 10+), count on a plaque
+        n.circle.style.display = unclaimed ? '' : 'none';
         n.circle.setAttribute('fill', color);
-        n.ring.setAttribute('r', (r + 4.5).toFixed(1));
-        n.text.textContent = unclaimed ? '' : fogged ? '?' : s.armies > 0 ? s.armies : '…'; // 0 only while armies are moving in
+        const kind = figKind(fogged ? 1 : s.armies || 1);
+        const key = `${kind}-${color.slice(1)}`;
+        let w = 14, fh = FIG_H[kind];
+        if (!unclaimed && FIGS[key]) {
+          const [sw, sh] = FIGS[key];
+          w = fh * sw / sh;
+          if (n.figKey !== key) {
+            n.fig.setAttribute('href', `figures/${key}.png`);
+            n.fig.setAttribute('width', w.toFixed(1)); n.fig.setAttribute('height', fh);
+            n.fig.setAttribute('x', (-w / 2).toFixed(1)); n.fig.setAttribute('y', (FEET - fh).toFixed(1));
+            n.figKey = key;
+          }
+        }
+        n.fig.style.display = unclaimed ? 'none' : '';
+        n.ring.setAttribute('rx', (w / 2 + 5).toFixed(1));
+        const label = unclaimed ? '' : fogged ? '?' : s.armies > 0 ? String(s.armies) : '…'; // 0 only while armies are moving in
+        n.text.textContent = label;
+        const pw = 9 + label.length * 6.6, px = w / 2 - 4, py = FEET - 10;
+        n.plaque.style.display = unclaimed ? 'none' : '';
+        n.plaque.setAttribute('x', px.toFixed(1)); n.plaque.setAttribute('y', py.toFixed(1)); n.plaque.setAttribute('width', pw.toFixed(1));
+        n.plaque.setAttribute('stroke', color);
+        n.text.setAttribute('x', (px + pw / 2).toFixed(1)); n.text.setAttribute('y', (py + 7.3).toFixed(1));
         n.badge.classList.toggle('fogged', fogged);
         n.badge.classList.toggle('unclaimed', unclaimed);
         const capOwner = view.capitals && Object.keys(view.capitals).find((pid) => view.capitals[pid] === id);
         n.star.style.display = capOwner ? '' : 'none';
         if (capOwner) {
-          n.star.setAttribute('transform', `translate(${(r * 0.72).toFixed(1)},${(-r * 0.72).toFixed(1)}) scale(1.15)`);
+          n.star.setAttribute('transform', `translate(${(-w / 2 - 2).toFixed(1)},${(FEET - fh + 4).toFixed(1)}) scale(1.25)`);
           n.star.setAttribute('fill', colors[capOwner] || '#fff');
         }
-        n.text.setAttribute('fill', textColorFor(color));
-        n.text.style.fontSize = Math.max(11, r * 1.05).toFixed(1) + 'px';
         n.armies = s.armies;
         const cl = n.path.classList;
         cl.toggle('clickable', ui.clickable.has(id));

@@ -23,6 +23,7 @@ An online territory-conquest strategy game for 2–6 friends. You divide a 42-te
 - **Diplomacy:** private messages, plus truce offers for 1–5 rounds. Truces can be broken, but the betrayal is announced to everyone and marked with 🗡 next to the betrayer's name.
 - **Live cursors** for everyone, the territory under each cursor outlined, and **emoji reactions** you can drop on the map (click one, then click the map, or press 1–8 while pointing).
 - **Sound effects** for dice, captures and betrayals, and **turn alerts**: a chime, plus a browser notification when it's your turn and the tab is in the background.
+- **Army figures:** each territory shows a painted miniature in the owner's colour (infantry for 1–4 armies, a horseman for 5–9, a cannon for 10+) with the count on a plaque, on an aged-parchment map.
 - **Readable at a glance:** continent-coloured land, troop badges in each owner's colour that grow with army size, red rings on your territories facing a bigger enemy stack, continents outlined in the holder's colour, and a balance-of-power bar. Hovering a player highlights their territories.
 - **Animations** for attacks, losses, captures, reinforcements and troop movements.
 - **End-of-game recap:** a chart of each player's armies over time, the biggest battle, luckiest and unluckiest dice, most conquests, broken truces, and a turn-by-turn **replay** of the whole game.
@@ -79,6 +80,7 @@ Territory names appear when you zoom in, or click **Names** to always show them.
 shared/map.js       Territories, continents and adjacency (used by server and browser)
 shared/map-geo.js   Generated real-world territory shapes (built by tools/build-map.js)
 tools/build-map.js  Builds the map shapes by merging and splitting Natural Earth countries
+tools/build-figures.js + tools/figures/  Renders the army figure sprites (three.js) into public/figures
 server/game.js      Rules engine. Server-authoritative, so every move is validated here
 server/missions.js  Secret mission definitions and win checks
 server/index.js     Web server, rooms, Socket.IO events, turn timer, bot driver, diplomacy, spectators

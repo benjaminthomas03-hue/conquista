@@ -200,7 +200,7 @@ input::placeholder { color: #6f8c8a; }
 .threat-ring { fill: none; stroke: #ff5a4a; stroke-width: 3; stroke-dasharray: 4 3; opacity: 0; }
 .badge.threatened .threat-ring { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .badge.threatened .threat-ring { animation: spin 6s linear infinite; transform-box: fill-box; transform-origin: center; }
+  .badge.threatened .threat-ring { animation: route-march 1.2s linear infinite; }
   .pop { transform-box: fill-box; transform-origin: center; }
   .pop.pop-grow { animation: pop-grow .45s ease-out; }
   .pop.pop-shake { animation: pop-shake .45s ease-in-out; }
@@ -455,3 +455,23 @@ input::placeholder { color: #6f8c8a; }
 .defend-timer.low::after { background: var(--danger); }
 @media (prefers-reduced-motion: no-preference) { .panel h3.alarm { animation: alarm-pulse 1.2s ease-in-out 2; } }
 @keyframes alarm-pulse { 50% { color: #fff; } }
+
+/* parchment texture over the land + figure markers */
+.paper { mix-blend-mode: multiply; pointer-events: none; }
+.badge .fig { transition: filter .12s; }
+.badge.clickable:hover .fig { filter: brightness(1.15) drop-shadow(0 0 2px rgba(255, 236, 190, .9)); }
+.badge .plaque { fill: #f6ecd2; stroke-width: 1.6; filter: url(#badge-shadow); }
+.badge text.count { font-family: var(--num); font-weight: 800; font-size: 11px; fill: #2a1c0e; text-anchor: middle; dominant-baseline: central; font-variant-numeric: lining-nums tabular-nums; }
+.badge.fogged .fig { opacity: .55; filter: grayscale(.4); }
+.badge .threat-ring { stroke-width: 2.2; }
+
+@media (max-width: 860px) {
+  /* on phones the map is short, so the reaction and zoom controls sit in a row underneath it */
+  .board-wrap { grid-template-columns: 1fr auto; row-gap: 6px; }
+  #board { grid-column: 1 / -1; }
+  .reactions, .zoom-ctrl { position: static; }
+  .reactions { justify-self: start; padding: 2px; gap: 0; }
+  .react-btn { width: 30px; height: 30px; font-size: 16px; }
+  .zoom-ctrl { flex-direction: row; justify-self: end; gap: 4px; }
+  .zoom-ctrl .btn { min-width: 34px; }
+}
