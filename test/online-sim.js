@@ -92,7 +92,7 @@ async function playGame({ humans, bots, settings, label }) {
         }
         let res = await call(c.s, 'game:action', { type: a[0], payload: a[1] });
         if (!res.ok && a[0] === 'fortify') res = await call(c.s, 'game:action', { type: 'endTurn' });
-        if (!res.ok && /not your (turn|pick)|not in progress|already|over/i.test(res.error)) { busy = false; return; } // raced a bot
+        if (!res.ok && /not your (turn|pick)|not in progress|already|over|no attack to defend|wait for the defender/i.test(res.error)) { busy = false; return; } // raced a bot
         if (!res.ok) return reject(new Error(`${label}: ${a[0]}: ${res.error}`));
         busy = false;
         kick();

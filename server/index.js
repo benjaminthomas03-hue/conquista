@@ -24,6 +24,7 @@ const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 const REACTIONS = ['😱', '🔥', '🤝', '😂', '💀', '👀', '🎯', '🛡️'];
 const PRE_GAME_SECONDS = { draft: 30, capitals: 60, setup: 180 };
 const ROOM_IDLE_MS = 6 * 60 * 60 * 1000;
+const DEFEND_SECONDS = Number(process.env.DEFEND_SECONDS || 20); // defender's time to roll before the game rolls 2 dice for them
 const BOT_SPEED = Number(process.env.BOT_DELAY_SCALE || 1); // tests set this low to run bot games fast
 // How long a bot waits before each move (ms, at Normal speed), so humans can follow along.
 const BOT_DELAY = { draft: 900, capitals: 800, setup: 600, attack: 2400, move: 1500, place: 1500, trade: 1600, endAttack: 1100, fortify: 1700, endTurn: 1200, other: 1400 };
@@ -89,6 +90,7 @@ function lobbyView(room) {
     botLevels: BOT_LEVELS,
     reactions: REACTIONS,
     deadline: room.deadline,
+    defendDeadline: room.defendDeadline || null,
     saving: store.enabled,
     players: room.players.map((p) => ({ id: p.id, name: p.name, color: p.color, colorName: p.colorName, connected: p.connected, bot: p.bot || null })),
     spectators: room.spectators.map((s) => ({ id: s.id, name: s.name })),
@@ -128,8 +130,29 @@ function scheduleTimer(room) {
     afterAction(room);
   }, secs * 1000);
 }
+// Defender's roll: if they don't respond in time, roll the most dice allowed for them.
+function manageDefence(room) {
+  const g = room.game, b = g && g.pendingBattle;
+  const key = b ? `${g.turnNumber}:${b.from}:${b.to}:${b.round}:${b.rounds}` : null;
+  if (key === room.defendKey) return;
+  clearTimeout(room.defendTimer);
+  room.defendKey = key;
+  room.defendDeadline = null;
+  if (!b) return;
+  const defender = room.players.find((p) => p.id === b.defender);
+  const secs = defender && defender.connected ? DEFEND_SECONDS : 2;
+  room.defendDeadline = Date.now() + secs * 1000;
+  room.defendTimer = setTimeout(() => {
+    if (room.game !== g || g.pendingBattle !== b) return;
+    const n = Math.min(2, g.territories[b.to].armies);
+    g.addLog(`${g.name(b.defender)} didn't roll in time, so the game rolled ${n} for them.`);
+    g.defend(b.defender, n, false);
+    afterAction(room);
+  }, secs * 1000);
+}
 function afterAction(room) {
   const g = room.game;
+  manageDefence(room);
   if (!g || g.timerKey() !== room.timerKey || g.phase === 'over') scheduleTimer(room);
   broadcast(room);
   scheduleBots(room);
@@ -137,6 +160,7 @@ function afterAction(room) {
 
 // ---------- AI bots ----------
 function nextBotMove(g) {
+  if (g.pendingBattle) return null; // a human is rolling to defend
   for (const p of g.players) {
     if (!p.bot || !p.alive) continue;
     const a = botAction(g, p.id, p.bot);
@@ -156,7 +180,7 @@ function scheduleBots(room) {
     const n = nextBotMove(g);
     if (!n) return;
     let res;
-    try { res = runAction(g, n.pid, n.action[0], n.action[1]); } catch (e) { res = { ok: false, error: e.message }; }
+    try { res = runAction(g, n.pid, n.action[0], n.action[1], room); } catch (e) { res = { ok: false, error: e.message }; }
     if (!res.ok && n.action[0] === 'fortify') res = g.endTurn(n.pid);
     if (!res.ok) {
       console.warn(`[bot] ${n.action[0]} failed (${res.error}); auto-playing`);
@@ -168,7 +192,13 @@ function scheduleBots(room) {
 }
 
 // ---------- action dispatch ----------
-function runAction(g, pid, type, p = {}) {
+// A defender rolls their own dice only if they're a human who is online.
+function defendsInteractively(room, g, tid) {
+  const t = g.territories[tid];
+  const def = t && room && room.players.find((p) => p.id === t.owner);
+  return !!(def && !def.bot && def.connected);
+}
+function runAction(g, pid, type, p = {}, room = null) {
   switch (type) {
     case 'draftPick': return g.draftPick(pid, p.territory);
     case 'capital': return g.chooseCapital(pid, p.territory);
@@ -177,7 +207,9 @@ function runAction(g, pid, type, p = {}) {
     case 'undo': return g.undoPlace(pid);
     case 'trade': return g.trade(pid, p.cards);
     case 'finishTrade': return g.finishForcedTrade(pid);
-    case 'attack': return g.attack(pid, p.from, p.to, p.dice, !!p.blitz);
+    case 'attack': return g.attack(pid, p.from, p.to, p.dice, !!p.blitz, defendsInteractively(room, g, p.to));
+    case 'defend': return g.defend(pid, p.dice, !!p.autoDefend);
+    case 'stopBattle': return g.stopBattle(pid);
     case 'move': return g.moveAfterConquest(pid, p.count);
     case 'endAttack': return g.endAttack(pid);
     case 'fortify': return g.fortify(pid, p.from, p.to, p.count);
@@ -343,7 +375,7 @@ io.on('connection', (socket) => {
   socket.on('game:action', ({ type, payload } = {}, cb) => {
     if (!room || !room.game || spectating) return reply(cb, { ok: false, error: 'No game running' });
     let res;
-    try { res = runAction(room.game, me.id, type, payload); }
+    try { res = runAction(room.game, me.id, type, payload, room); }
     catch (e) { console.error(e); res = { ok: false, error: 'Server error' }; }
     reply(cb, res);
     if (res.ok) afterAction(room);

@@ -43,6 +43,7 @@ class Game {
     this.conqueredThisTurn = false;
     this.attacksThisTurn = 0;
     this.pendingMove = null;
+    this.pendingBattle = null;
     this.returnToAttack = false;
     this.lastBattle = null;
     this.tradeCount = 0;
@@ -374,10 +375,13 @@ class Game {
     return best;
   }
 
-  attack(pid, from, to, dice = 3, blitz = false) {
+  // interactive: the defender rolls their own dice (1 or 2) for each round. The server sets this
+  // when the defender is a human who is online; bots and absent players defend automatically.
+  attack(pid, from, to, dice = 3, blitz = false, interactive = false) {
     const e = this.requireTurn(pid); if (e) return fail(e);
     if (this.step !== 'attack') return fail('You are not in the attack step');
     if (this.pendingMove) return fail('Move armies into your conquered territory first');
+    if (this.pendingBattle) return fail('Wait for the defender to roll');
     const a = this.territories[from], d = this.territories[to];
     if (!a || !d) return fail('Unknown territory');
     if (a.owner !== pid) return fail('Attack from your own territory');
@@ -394,38 +398,81 @@ class Game {
       this.addLog(`⚠ ${this.name(pid)} broke their truce with ${this.name(defenderId)}!`);
       this.addEvent({ type: 'betrayal', attacker: pid, defender: defenderId });
     }
-
-    const sa = this.stats.perPlayer[pid], sd = this.stats.perPlayer[defenderId];
-    let totalAttLoss = 0, totalDefLoss = 0, rounds = 0, attDice, defDice, usedDice;
-    do {
-      usedDice = Math.max(1, Math.min(blitz ? 3 : Math.floor(Number(dice)) || 3, 3, a.armies - 1));
-      attDice = this.roll(usedDice);
-      defDice = this.roll(Math.min(2, d.armies));
-      const exp = ODDS.expectedLosses(attDice.length, defDice.length);
-      let al = 0, dl = 0;
-      for (let i = 0; i < Math.min(attDice.length, defDice.length); i++) {
-        if (attDice[i] > defDice[i]) { d.armies--; dl++; } else { a.armies--; al++; }
-      }
-      totalAttLoss += al; totalDefLoss += dl;
-      // luck = kills above expectation (attacker) and losses avoided (defender)
-      sa.luck += dl - exp.def; sd.luck += exp.def - dl;
-      rounds++;
-    } while (blitz && d.armies > 0 && a.armies >= 2);
     this.attacksThisTurn++;
-    sa.kills += totalDefLoss; sa.losses += totalAttLoss;
-    sd.kills += totalAttLoss; sd.losses += totalDefLoss;
-
-    const conquered = d.armies === 0;
-    const size = totalAttLoss + totalDefLoss;
-    if (!this.stats.biggestBattle || size > this.stats.biggestBattle.size) {
-      this.stats.biggestBattle = { size, attacker: pid, defender: defenderId, to, turn: this.turnNumber, attLoss: totalAttLoss, defLoss: totalDefLoss };
-    }
-    this.lastBattle = {
-      from, to, attacker: pid, defender: defenderId, attDice, defDice,
-      attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered, t: Date.now(),
+    const battle = {
+      from, to, attacker: pid, defender: defenderId, blitz: !!blitz,
+      dice: blitz ? 3 : Math.floor(Number(dice)) || 3,
+      attLoss: 0, defLoss: 0, rounds: 0, autoDefend: !interactive, round: 0,
     };
-    this.addEvent({ type: 'battle', from, to, attacker: pid, defender: defenderId, attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered });
-    if (blitz) this.addLog(`${this.name(pid)} blitzed ${this.tname(to)} from ${this.tname(from)}: lost ${totalAttLoss}, killed ${totalDefLoss}.`);
+    if (interactive) {
+      this.pendingBattle = battle;
+      this.addLog(`${this.name(pid)} attacks ${this.tname(to)} from ${this.tname(from)}${blitz ? ' (blitz)' : ''}. ${this.name(defenderId)}, roll to defend!`);
+      return OK;
+    }
+    return this.fight(battle, null);
+  }
+
+  // One round of dice. defDiceWanted: 1 or 2 (null = the most allowed).
+  rollRound(battle, defDiceWanted) {
+    const a = this.territories[battle.from], d = this.territories[battle.to];
+    const usedDice = Math.max(1, Math.min(battle.dice, 3, a.armies - 1));
+    const attDice = this.roll(usedDice);
+    const defDice = this.roll(Math.max(1, Math.min(defDiceWanted || 2, 2, d.armies)));
+    const exp = ODDS.expectedLosses(attDice.length, defDice.length);
+    let al = 0, dl = 0;
+    for (let i = 0; i < Math.min(attDice.length, defDice.length); i++) {
+      if (attDice[i] > defDice[i]) { d.armies--; dl++; } else { a.armies--; al++; }
+    }
+    const sa = this.stats.perPlayer[battle.attacker], sd = this.stats.perPlayer[battle.defender];
+    if (sa && sd) { sa.luck += dl - exp.def; sd.luck += exp.def - dl; }
+    battle.attLoss += al; battle.defLoss += dl; battle.rounds++;
+    battle.usedDice = usedDice; battle.attDice = attDice; battle.defDice = defDice;
+    battle.lastAttLoss = al; battle.lastDefLoss = dl;
+  }
+
+  // Keeps rolling while the battle continues and no defender input is needed, then settles it.
+  fight(battle, defDiceWanted) {
+    const a = this.territories[battle.from], d = this.territories[battle.to];
+    let first = true;
+    do {
+      this.rollRound(battle, first ? defDiceWanted : null);
+      first = false;
+    } while (battle.blitz && battle.autoDefend && d.armies > 0 && a.armies >= 2);
+    const over = !battle.blitz || d.armies === 0 || a.armies < 2;
+    if (!over) {
+      // interactive blitz: show this round, then wait for the defender's next roll
+      battle.round++;
+      this.pendingBattle = battle;
+      this.lastBattle = { ...this.battleSummary(battle), t: Date.now() };
+      this.addEvent({ type: 'battle', from: battle.from, to: battle.to, attacker: battle.attacker, defender: battle.defender, attLoss: battle.lastAttLoss, defLoss: battle.lastDefLoss, rounds: 1, conquered: false });
+      return OK;
+    }
+    return this.finishBattle(battle);
+  }
+
+  battleSummary(b) {
+    return { from: b.from, to: b.to, attacker: b.attacker, defender: b.defender, attDice: b.attDice, defDice: b.defDice,
+      attLoss: b.attLoss, defLoss: b.defLoss, rounds: b.rounds, conquered: this.territories[b.to].armies === 0 };
+  }
+
+  finishBattle(battle) {
+    this.pendingBattle = null;
+    const pid = battle.attacker, defenderId = battle.defender, { from, to } = battle;
+    const a = this.territories[from], d = this.territories[to];
+    const sa = this.stats.perPlayer[pid], sd = this.stats.perPlayer[defenderId];
+    sa.kills += battle.defLoss; sa.losses += battle.attLoss;
+    sd.kills += battle.attLoss; sd.losses += battle.defLoss;
+    const conquered = d.armies === 0;
+    const size = battle.attLoss + battle.defLoss;
+    if (!this.stats.biggestBattle || size > this.stats.biggestBattle.size) {
+      this.stats.biggestBattle = { size, attacker: pid, defender: defenderId, to, turn: this.turnNumber, attLoss: battle.attLoss, defLoss: battle.defLoss };
+    }
+    this.lastBattle = { ...this.battleSummary(battle), t: Date.now() };
+    // the animation shows what happened since the last update
+    const shownA = battle.shownAttLoss || 0, shownD = battle.shownDefLoss || 0;
+    this.addEvent({ type: 'battle', from, to, attacker: pid, defender: defenderId, attLoss: battle.attLoss - shownA, defLoss: battle.defLoss - shownD, rounds: battle.rounds, conquered });
+    if (battle.blitz) this.addLog(`${this.name(pid)} blitzed ${this.tname(to)} from ${this.tname(from)}: lost ${battle.attLoss}, killed ${battle.defLoss}.`);
+    else if (!battle.autoDefend || battle.interactiveRound) this.addLog(`${this.name(pid)} attacked ${this.tname(to)}: lost ${battle.attLoss}, killed ${battle.defLoss}.`);
 
     if (conquered) {
       d.owner = pid;
@@ -434,13 +481,37 @@ class Game {
       sa.conquests++;
       const capOf = Object.keys(this.capitals).find((k) => this.capitals[k] === to);
       this.addLog(`${this.name(pid)} conquered ${this.tname(to)} from ${this.name(defenderId)}${capOf ? ` — ${this.name(capOf)}'s capital!` : ''}.`);
-      const min = usedDice, max = a.armies - 1;
+      const min = battle.usedDice, max = a.armies - 1;
       this.pendingMove = { from, to, min: Math.min(min, max), max };
       if (this.pendingMove.min >= this.pendingMove.max) this.moveAfterConquest(pid, this.pendingMove.max);
       this.checkElimination(defenderId, pid);
     }
     this.checkWin(pid);
     return OK;
+  }
+
+  // The defender rolls (1 or 2 dice). autoDefend: for a blitz, let the rest play out automatically.
+  defend(pid, dice, autoDefend = false) {
+    const b = this.pendingBattle;
+    if (!b || this.phase !== 'playing') return fail('There is no attack to defend');
+    if (b.defender !== pid) return fail('You are not the defender');
+    const n = Math.floor(Number(dice)) || 2;
+    if (n < 1 || n > 2) return fail('Roll 1 or 2 dice');
+    if (n > this.territories[b.to].armies) return fail('You need 2 armies to roll 2 dice');
+    if (autoDefend && b.blitz) b.autoDefend = true;
+    b.interactiveRound = true;
+    b.shownAttLoss = b.attLoss; b.shownDefLoss = b.defLoss;
+    this.pendingBattle = null;
+    return this.fight(b, n);
+  }
+
+  // The attacker calls off an interactive blitz while waiting for the defender.
+  stopBattle(pid) {
+    const b = this.pendingBattle;
+    if (!b || b.attacker !== pid) return fail('There is no attack to stop');
+    if (!b.rounds) { this.pendingBattle = null; this.addLog(`${this.name(pid)} called off the attack on ${this.tname(b.to)}.`); return OK; }
+    b.shownAttLoss = b.attLoss; b.shownDefLoss = b.defLoss;
+    return this.finishBattle(b);
   }
 
   moveAfterConquest(pid, n) {
@@ -503,6 +574,7 @@ class Game {
 
   endAttack(pid) {
     const e = this.requireTurn(pid); if (e) return fail(e);
+    if (this.pendingBattle) return fail('Wait for the defender to roll');
     if (this.step !== 'attack') return fail('You are not in the attack step');
     if (this.pendingMove) return fail('Move armies into your conquered territory first');
     this.step = 'fortify';
@@ -524,6 +596,7 @@ class Game {
 
   fortify(pid, from, to, n) {
     const e = this.requireTurn(pid); if (e) return fail(e);
+    if (this.pendingBattle) return fail('Wait for the defender to roll');
     if (this.step === 'attack' && !this.pendingMove) this.step = 'fortify';
     if (this.step !== 'fortify') return fail('You are not in the fortify step');
     const a = this.territories[from], b = this.territories[to];
@@ -543,6 +616,7 @@ class Game {
 
   endTurn(pid) {
     const e = this.requireTurn(pid); if (e) return fail(e);
+    if (this.pendingBattle) return fail('Wait for the defender to roll');
     if (this.step === 'reinforce') return fail('Place all reinforcements first');
     if (this.pendingMove) return fail('Move armies into your conquered territory first');
     const p = this.current;
@@ -589,6 +663,7 @@ class Game {
     if (this.phase === 'draft' || this.phase === 'capitals' || this.phase === 'setup') return this.autoCompleteSetup();
     if (this.phase !== 'playing') return;
     const p = this.current;
+    if (this.pendingBattle) this.stopBattle(p.id);
     if (this.pendingMove) this.moveAfterConquest(p.id, this.pendingMove.min);
     if (this.step === 'reinforce') {
       while (p.cards.length >= 5) {
@@ -671,6 +746,7 @@ class Game {
       reinforcements: this.reinforcements,
       setupRemaining: this.setupRemaining,
       pendingMove: this.pendingMove,
+      pendingBattle: this.pendingBattle && { ...this.battleSummary(this.pendingBattle), blitz: this.pendingBattle.blitz, round: this.pendingBattle.round, attArmies: this.territories[this.pendingBattle.from].armies, defArmies: this.territories[this.pendingBattle.to].armies, attDiceNext: Math.max(1, Math.min(this.pendingBattle.dice, 3, this.territories[this.pendingBattle.from].armies - 1)) },
       returnToAttack: this.returnToAttack,
       lastBattle: vis && this.lastBattle && !(vis.has(this.lastBattle.from) || vis.has(this.lastBattle.to)) ? null : this.lastBattle,
       nextTradeValue: this.nextTradeValue(),

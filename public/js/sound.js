@@ -42,6 +42,7 @@
     betrayal: () => { tone(220, 0, 0.5, { type: 'sawtooth', vol: 0.07, slide: 0.7 }); tone(233, 0, 0.5, { type: 'sawtooth', vol: 0.06, slide: 0.7 }); },
     win: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.14, 0.4, { type: 'triangle', vol: 0.16 })); },
     react: () => tone(900, 0, 0.09, { vol: 0.06, slide: 1.4 }),
+    alarm: () => { [0, .16, .32].forEach((t) => tone(740, t, 0.12, { type: 'square', vol: 0.06 })); },
     truce: () => { tone(494, 0, 0.18, { vol: 0.12 }); tone(659, 0.12, 0.3, { vol: 0.12 }); },
   };
 
@@ -57,6 +58,13 @@
       if (perm !== 'granted') return { ok: false, error: 'Notifications are blocked for this site in your browser settings' };
       this.alerts = true; set('cq:alerts', true);
       return { ok: true, on: true };
+    },
+    // Called when one of your territories is attacked and you need to roll.
+    defend(text) {
+      if (document.hidden) {
+        if (this.alerts) try { new Notification('Conquista: you are under attack', { body: text, tag: 'conquista-defend' }); } catch { /* ignore */ }
+        if (this.enabled && ctx) try { SOUNDS.alarm(); } catch { /* ignore */ }
+      } else this.play('alarm');
     },
     // Called when it becomes your turn.
     yourTurn(text) {

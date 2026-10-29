@@ -441,3 +441,17 @@ input::placeholder { color: #6f8c8a; }
 
 .botspeed-select { width: auto; padding: 5px 8px; font-size: 13px; background: transparent; border: 1px solid var(--line); border-radius: 8px; }
 .routes { pointer-events: none; }
+
+/* defence prompt */
+.panel h3.alarm { color: #ffb3a9; }
+.defend-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 8px; }
+.defend-opts .btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; }
+.defend-opts .btn small { font-size: 11px; font-weight: 500; opacity: .8; }
+.auto-def { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 0 8px; cursor: pointer; }
+.auto-def input { width: auto; accent-color: var(--brass); }
+.defend-timer { font-family: var(--num); font-weight: 700; font-size: 15px; margin: 4px 0 2px; position: relative; padding-bottom: 6px; }
+.defend-timer::after { content: ''; position: absolute; left: 0; bottom: 0; height: 3px; border-radius: 2px; background: var(--brass); width: calc(var(--p, 0) * 100%); transition: width .2s linear; }
+.defend-timer.low { color: var(--danger); }
+.defend-timer.low::after { background: var(--danger); }
+@media (prefers-reduced-motion: no-preference) { .panel h3.alarm { animation: alarm-pulse 1.2s ease-in-out 2; } }
+@keyframes alarm-pulse { 50% { color: #fff; } }

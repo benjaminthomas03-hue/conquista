@@ -123,6 +123,35 @@ function playOut(g, { roundTrip = false } = {}) {
   console.log('✓ truce agreed, then broken with a betrayal flag');
 }
 
+{ // interactive defence: defender rolls 1 or 2 dice; blitz waits each round unless auto-defend
+  const g = new Game(mkPlayers(2, [null]));
+  g.autoCompleteSetup();
+  const a = g.current.id, b = g.players.find((p) => p.id !== a).id;
+  g.place(a, g.ownedIds(a)[0], g.reinforcements);
+  let from, to;
+  for (const t of g.ownedIds(a)) for (const n of MAP.territories[t].neighbors) if (g.territories[n].owner === b && !from) { from = t; to = n; }
+  g.territories[from].armies = 30; g.territories[to].armies = 6;
+  assert.ok(g.attack(a, from, to, 3, true, true).ok);
+  assert.ok(g.pendingBattle, 'waits for the defender');
+  assert.ok(!g.endAttack(a).ok, 'attacker cannot move on while waiting');
+  assert.ok(!g.defend(a, 2).ok, 'only the defender can roll');
+  assert.ok(g.defend(b, 2).ok);
+  assert.strictEqual(g.lastBattle.defDice.length, 2);
+  if (g.pendingBattle) { assert.ok(g.defend(b, 1).ok); if (g.pendingBattle) assert.strictEqual(g.lastBattle.defDice.length, 1); }
+  if (g.pendingBattle) { assert.ok(g.defend(b, 2, true).ok); assert.ok(!g.pendingBattle, 'auto-defend plays the rest out'); }
+  assert.ok(!g.pendingBattle);
+  // attacker can call off a blitz while waiting
+  if (g.pendingMove) g.moveAfterConquest(a, g.pendingMove.min);
+  let f2, t2;
+  for (const t of g.ownedIds(a)) for (const n of MAP.territories[t].neighbors) if (g.territories[n].owner === b && !f2) { f2 = t; t2 = n; }
+  if (f2) {
+    g.territories[f2].armies = 20; g.territories[t2].armies = 15;
+    g.attack(a, f2, t2, 3, true, true); g.defend(b, 2);
+    if (g.pendingBattle) { assert.ok(g.stopBattle(a).ok); assert.ok(!g.pendingBattle); }
+  }
+  console.log('✓ interactive defence: 1 or 2 dice, blitz waits each round, auto-defend, attacker can call off');
+}
+
 // ---------- full bot games across options ----------
 const N = Number(process.argv[2] || 120);
 const modes = ['domination', 'missions', 'capitals'];

@@ -30,6 +30,11 @@ function nextAction(v, me) {
     if (v.setupRemaining[me] > 0) return ['placeSetup', { territory: pick(border.length ? border : mine), count: Math.min(3, v.setupRemaining[me]) }];
     return null;
   }
+  if (v.phase === 'playing' && v.pendingBattle) {
+    // defend when it's our territory under attack; otherwise wait
+    if (v.pendingBattle.defender === me) return ['defend', { dice: Math.min(2, v.pendingBattle.defArmies), autoDefend: Math.random() < 0.3 }];
+    return null;
+  }
   if (v.phase !== 'playing' || v.currentPlayer !== me) return null;
   const meP = v.players.find((p) => p.id === me);
   if (v.pendingMove) return ['move', { count: v.pendingMove.max }];

@@ -289,6 +289,7 @@
     if (S.prevGame && S.prevGame.phase === 'playing') {
       for (const id of all) if (S.prevGame.territories[id] && S.prevGame.territories[id].owner !== g.territories[id].owner) flash.add(id);
     }
+    if (g.pendingBattle) return { clickable: new Set(), dim, flash, sel: g.pendingBattle.from, target: g.pendingBattle.to, threats: threatSet(), focus: u.focus };
     return { clickable, dim, flash, sel: u.sel, target: u.target, threats: threatSet(), focus: u.focus };
   }
 
@@ -322,7 +323,35 @@
     const curr = playerById(g.currentPlayer);
     let h = '';
 
-    if (S.spectator) {
+    const pb = g.phase === 'playing' && g.pendingBattle;
+    if (pb && !S.spectator && (pb.defender === S.you || pb.attacker === S.you)) {
+      const att = playerById(pb.attacker), def = playerById(pb.defender);
+      const vs = `<div class="vs"><div class="side">${dot(att.color)}<span>${esc(MAP.territories[pb.from].name)}</span><b>${pb.attArmies}</b></div>
+          <div class="side">${dot(def.color)}<span>${esc(MAP.territories[pb.to].name)}</span><b>${pb.defArmies}</b></div></div>`;
+      const timer = `<div class="defend-timer" id="defend-timer"></div>`;
+      if (pb.defender === S.you) {
+        // odds for this roll with 1 or 2 dice, so the choice is informed
+        const lose = (d) => { const o = ODDS.ROLL[pb.attDiceNext][d]; let e = 0; for (const x of o) e += x.p * x.def; return e; };
+        const opt = (d) => {
+          const o = ODDS.ROLL[pb.attDiceNext][d];
+          const kills = o.reduce((a, x) => a + x.p * x.att, 0);
+          return `<button class="btn ${d === 2 ? 'btn-brass' : ''}" data-def="${d}" ${d > pb.defArmies ? 'disabled' : ''}>
+            Roll ${d} ${d === 1 ? 'die' : 'dice'}<small>You risk ${d} ${d === 1 ? 'army' : 'armies'}, they lose ${kills.toFixed(1)} on average</small></button>`;
+        };
+        void lose;
+        h = `<h3 class="alarm">Defend ${esc(MAP.territories[pb.to].name)}!</h3>
+          <p>${esc(att.name)} ${pb.blitz ? 'is blitzing' : 'attacks'} from ${esc(MAP.territories[pb.from].name)} with ${pb.attDiceNext} ${pb.attDiceNext === 1 ? 'die' : 'dice'}${pb.rounds ? `. So far: they lost ${pb.attLoss}, you lost ${pb.defLoss}` : ''}.</p>
+          ${vs}
+          <div class="defend-opts">${opt(1)}${opt(2)}</div>
+          ${pb.blitz ? `<label class="auto-def"><input type="checkbox" id="chk-autodef"> Auto-defend the rest of this blitz</label>` : ''}
+          ${timer}<p class="muted small">If you don't roll in time, the game rolls ${Math.min(2, pb.defArmies)} for you.</p>`;
+      } else {
+        h = `<h3>${pb.blitz ? 'Blitz' : 'Attack'}: waiting for ${esc(def.name)}</h3>
+          <p>${esc(def.name)} is rolling to defend ${esc(MAP.territories[pb.to].name)}${pb.rounds ? `. So far: you lost ${pb.attLoss}, they lost ${pb.defLoss}` : ''}.</p>
+          ${vs}${timer}
+          <div class="row"><button class="btn btn-ghost" id="btn-stop-battle">Call off attack</button></div>`;
+      }
+    } else if (S.spectator) {
       h = `<h3>Watching</h3><p>${g.phase === 'playing' ? `${esc(curr.name)} is ${stepText(g.step, false).toLowerCase()}` : g.phase === 'over' ? `${esc(playerById(g.winner).name)} won.` : 'The players are getting set up.'}</p>`;
     } else if (g.phase === 'draft') {
       const left = Object.values(g.territories).filter((t) => !t.owner).length;
@@ -345,7 +374,9 @@
     } else if (!isMyTurn()) {
       const lp = S.room.players.find((p) => p.id === g.currentPlayer);
       const offline = lp && !lp.connected;
-      h = `<h3>${esc(curr.name)}'s turn</h3><p>${curr.bot ? 'Bot thinking… ' : ''}${stepText(g.step, false)}${offline ? ' They are offline.' : ''}</p>`;
+      h = pb
+        ? `<h3>${esc(curr.name)}'s turn</h3><p>${esc(curr.name)} is attacking ${esc(MAP.territories[pb.to].name)}. Waiting for ${esc(playerById(pb.defender).name)} to roll.</p>`
+        : `<h3>${esc(curr.name)}'s turn</h3><p>${curr.bot ? 'Bot thinking… ' : ''}${stepText(g.step, false)}${offline ? ' They are offline.' : ''}</p>`;
       if (offline && isHost()) h += `<button class="btn btn-sm" id="btn-skip">Skip their turn</button>`;
     } else if (g.step === 'reinforce') {
       h = mp.cards.length >= 5
@@ -392,6 +423,11 @@
     bindRange('mv'); bindRange('fv');
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     on('btn-skip', () => emit('game:skip'));
+    on('btn-stop-battle', () => act('stopBattle'));
+    P.querySelectorAll('[data-def]').forEach((b) => (b.onclick = () => {
+      P.querySelectorAll('[data-def]').forEach((x) => (x.disabled = true));
+      act('defend', { dice: Number(b.dataset.def), autoDefend: !!($('chk-autodef') && $('chk-autodef').checked) });
+    }));
     on('btn-undo', () => act('undo'));
     on('btn-move', () => act('move', { count: Number($('mv').value) }));
     on('btn-attack', () => act('attack', { from: u.sel, to: u.target, dice: u.dice }));
@@ -658,7 +694,7 @@
     renderLog();
     renderReactions();
     renderGameOver();
-    document.title = isMyTurn() || (g.phase === 'draft' && g.currentPlayer === S.you) ? '● Your turn · Conquista' : 'Conquista';
+    document.title = g.pendingBattle && g.pendingBattle.defender === S.you ? '⚔ Defend! · Conquista' : isMyTurn() || (g.phase === 'draft' && g.currentPlayer === S.you) ? '● Your turn · Conquista' : 'Conquista';
   }
 
   // ---------- emoji reactions ----------
@@ -699,6 +735,15 @@
   });
 
   // ---------- timer ----------
+  setInterval(() => {
+    const dt = $('defend-timer'), dd = S.room && S.room.defendDeadline;
+    if (dt) {
+      const s = dd ? Math.max(0, Math.ceil((dd - Date.now()) / 1000)) : 0;
+      dt.textContent = dd ? `${s}s to roll` : '';
+      dt.classList.toggle('low', s <= 5);
+      dt.style.setProperty('--p', dd ? Math.max(0, (dd - Date.now()) / 20000) : 0);
+    }
+  }, 200);
   setInterval(() => {
     const el = $('timer');
     const d = S.room && S.room.deadline;
@@ -801,6 +846,13 @@
       Sound.yourTurn(g.phase === 'draft' ? 'Your pick in the draft' : `Turn ${g.turnNumber}: ${g.reinforcements} reinforcements to place`);
     }
     wasMyTurn = mine;
+    const pbk = g && g.pendingBattle && g.pendingBattle.defender === S.you ? `${g.turnNumber}:${g.pendingBattle.to}:${g.pendingBattle.rounds}` : null;
+    if (pbk && pbk !== S.ui.defendKey) {
+      const pb2 = g.pendingBattle;
+      if (!pb2.rounds) toast(`${playerById(pb2.attacker).name} is attacking ${MAP.territories[pb2.to].name}. Roll to defend!`, true);
+      Sound.defend(`${playerById(pb2.attacker).name} is attacking ${MAP.territories[pb2.to].name}. Roll to defend!`);
+    }
+    S.ui.defendKey = pbk;
     if (g && g.phase === 'over' && lastPhase && lastPhase !== 'over') Sound.play('win');
     lastPhase = g ? g.phase : null;
   });
