@@ -130,7 +130,7 @@
   $('btn-start').onclick = () => emit('room:start');
   $('btn-add-bot').onclick = () => emit('room:addBot', { level: $('sel-bot').value });
   const bindSeg = (id, key) => { $(id).onclick = (e) => { const b = e.target.closest('button'); if (b && !b.disabled) emit('room:settings', { [key]: b.dataset.v }); }; };
-  bindSeg('seg-mode', 'mode'); bindSeg('seg-start', 'start'); bindSeg('seg-cards', 'cards'); bindSeg('seg-botspeed', 'botSpeed');
+  bindSeg('seg-mode', 'mode'); bindSeg('seg-start', 'start'); bindSeg('seg-cards', 'cards');
   $('sel-botspeed').onchange = (e) => emit('room:botSpeed', { speed: e.target.value });
   $('chk-fog').onchange = (e) => emit('room:settings', { fog: e.target.checked });
   $('sel-timer').onchange = (e) => emit('room:settings', { timer: Number(e.target.value) });
@@ -156,13 +156,12 @@
     $('color-swatches').querySelectorAll('.swatch').forEach((b) => (b.onclick = () => emit('room:color', { color: b.dataset.c })));
     $('lobby-settings').disabled = !host;
     const st = r.settings;
-    for (const [id, key] of [['seg-mode', 'mode'], ['seg-start', 'start'], ['seg-cards', 'cards'], ['seg-botspeed', 'botSpeed']]) {
+    for (const [id, key] of [['seg-mode', 'mode'], ['seg-start', 'start'], ['seg-cards', 'cards']]) {
       $(id).querySelectorAll('button').forEach((b) => { const on = b.dataset.v === st[key]; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
     }
     $('hint-start').textContent = st.start === 'draft' ? 'Players take turns claiming territories' : 'Territories are dealt out at random';
     $('hint-cards').textContent = st.cards === 'fixed' ? 'Sets are worth 4, 6, 8 or 10' : 'Each set is worth more: 4, 6, 8, 10…';
     $('chk-fog').checked = !!st.fog;
-    $('bot-speed-field').hidden = !r.players.some((p) => p.bot);
     $('sel-timer').value = String(st.timer);
     $('btn-start').hidden = !host;
     $('btn-start').disabled = r.players.length < 2;
