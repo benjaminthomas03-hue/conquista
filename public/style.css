@@ -136,6 +136,8 @@ input::placeholder { color: #6f8c8a; }
 .legend ul { list-style: none; padding: 0; margin: 8px 0 0; font-size: 13px; }
 .legend li { display: flex; justify-content: space-between; padding: 3px 0; }
 .legend li.held { color: var(--brass-hi); }
+.legend .cname { display: flex; align-items: center; gap: 7px; }
+.legend .dot { width: 11px; height: 11px; border-radius: 3px; }
 
 .board-wrap {
   position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 10px;
@@ -156,8 +158,8 @@ input::placeholder { color: #6f8c8a; }
 
 /* map elements */
 .graticule { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(190, 225, 222, 0.09); stroke-width: .8; }
-.shelf { vector-effect: non-scaling-stroke; stroke-width: 7; stroke-linejoin: round; opacity: .5; }
-.terr { vector-effect: non-scaling-stroke; stroke: rgba(10, 30, 35, .7); stroke-width: .8; stroke-linejoin: round; cursor: default; transition: filter .12s; }
+.shelf { vector-effect: non-scaling-stroke; stroke-width: 6; stroke-linejoin: round; opacity: .35; }
+.terr { vector-effect: non-scaling-stroke; stroke: rgba(10, 30, 35, .75); stroke-width: 1; stroke-linejoin: round; cursor: default; transition: filter .12s; }
 .terr.clickable { cursor: pointer; }
 .terr.clickable:hover { filter: brightness(1.18); }
 .terr.dim { filter: saturate(.35) brightness(.7); }
@@ -168,7 +170,7 @@ input::placeholder { color: #6f8c8a; }
 @keyframes flash { 0% { filter: brightness(2); } 100% { filter: brightness(1); } }
 .sea-route { vector-effect: non-scaling-stroke; stroke: rgba(225, 240, 236, .35); stroke-width: 1.4; stroke-dasharray: 4 5; fill: none; }
 /* troop badges: owner-coloured, sized by troop count (set in board.js) */
-.badge .disc { stroke: #0b1f24; stroke-width: 2; }
+.badge .disc { stroke: #0b1f24; stroke-width: 2.5; }
 .badge.clickable { cursor: pointer; }
 .badge.clickable:hover .disc { stroke: #fff; }
 .badge.dim { opacity: .45; }
@@ -214,6 +216,14 @@ input::placeholder { color: #6f8c8a; }
 @keyframes fx-rise { 0% { opacity: 0; transform: translateY(0); } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(var(--rise)); } }
 @keyframes fx-burst { 0% { r: 6px; opacity: 1; } 100% { r: var(--burst); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .fx-float { animation: fx-fade 1.6s forwards; } .fx-burst { animation: fx-fade .9s forwards; } }
+
+/* other players' cursors */
+.cursors { pointer-events: none; }
+.cursor { transition: transform .09s linear, opacity .3s; }
+.cursor.gone, .cursor-terr.gone { opacity: 0; }
+.cursor-arrow { stroke: #fff; stroke-width: 1.4; stroke-linejoin: round; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.6)); }
+.cursor-name { font-family: var(--body); font-size: 9.5px; font-weight: 700; }
+.cursor-terr { fill: none; stroke-width: 3; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; transition: opacity .3s; }
 
 /* balance of power */
 .power { margin-top: -4px; }

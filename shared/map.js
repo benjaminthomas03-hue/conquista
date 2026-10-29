@@ -5,12 +5,12 @@
   else root.CONQUISTA_MAP = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   const CONTINENTS = {
-    NA: { name: 'North America', bonus: 5, color: '#c9a66b' },
-    SA: { name: 'South America', bonus: 2, color: '#b5795a' },
-    EU: { name: 'Europe',        bonus: 5, color: '#8b9bb4' },
-    AF: { name: 'Africa',        bonus: 3, color: '#c58b4c' },
-    AS: { name: 'Asia',          bonus: 7, color: '#8fa876' },
-    AU: { name: 'Australia',     bonus: 2, color: '#a77fa0' },
+    NA: { name: 'North America', bonus: 5, color: '#d6bf72' },
+    SA: { name: 'South America', bonus: 2, color: '#c98674' },
+    EU: { name: 'Europe',        bonus: 5, color: '#86a6d0' },
+    AF: { name: 'Africa',        bonus: 3, color: '#b98f69' },
+    AS: { name: 'Asia',          bonus: 7, color: '#8db37f' },
+    AU: { name: 'Australia',     bonus: 2, color: '#b497c6' },
   };
 
   // id: [name, continent, x, y]  (board is 1000 x 560)

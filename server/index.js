@@ -219,6 +219,20 @@ io.on('connection', (socket) => {
     afterAction(room);
   });
 
+  // Live cursors: relay where each player is pointing on the board (throttled), so others see moves brewing.
+  let lastCursor = 0;
+  socket.on('cursor', (c = {}) => {
+    if (!room || !room.game || !me) return;
+    const now = Date.now();
+    if (now - lastCursor < 50) return;
+    lastCursor = now;
+    const ok = (v, max) => typeof v === 'number' && isFinite(v) && v >= 0 && v <= max;
+    const out = { id: me.id };
+    if (ok(c.x, 2000) && ok(c.y, 2000)) { out.x = Math.round(c.x * 10) / 10; out.y = Math.round(c.y * 10) / 10; }
+    if (typeof c.tid === 'string' && room.game.territories[c.tid]) out.tid = c.tid;
+    socket.to(room.code).emit('cursor', out);
+  });
+
   socket.on('chat', ({ text } = {}) => {
     if (!room) return;
     const msg = String(text || '').replace(/[<>]/g, '').trim().slice(0, 200);

@@ -11,6 +11,8 @@ An online territory-conquest strategy game for 2–6 friends. You divide a 42-te
 - Reconnection: refresh or lose Wi-Fi and you rejoin the same seat. The host can skip the turn of a player who has gone offline.
 - Table chat and a running log of battles.
 - Readable at a glance: troop badges in each owner's colour that grow with army size, red rings on your territories facing a bigger enemy stack, continents outlined in the holder's colour, a balance-of-power bar, and hovering a player highlights their territories.
+- Live cursors: see where the other players are pointing, with the territory under their cursor outlined in their colour.
+- Each continent has its own colour; troop badges show the owner's colour.
 - Live animations for everyone: attack arrows, troop losses, captures, reinforcements and troop movements.
 - A real world map built from Natural Earth country borders. Zoom with the scroll wheel or the +/− buttons, and drag to pan.
 

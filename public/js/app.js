@@ -401,7 +401,7 @@
     $('continent-list').innerHTML = Object.entries(MAP.CONTINENTS).map(([c, info]) => {
       const held = MAP.continentTerritories[c].every((t) => g.territories[t].owner === S.you);
       const n = MAP.continentTerritories[c].filter((t) => g.territories[t].owner === S.you).length;
-      return `<li class="${held ? 'held' : ''}"><span>${info.name}</span><span>${n}/${MAP.continentTerritories[c].length} · +${info.bonus}</span></li>`;
+      return `<li class="${held ? 'held' : ''}"><span class="cname">${dot(info.color)}${info.name}</span><span>${n}/${MAP.continentTerritories[c].length} · +${info.bonus}</span></li>`;
     }).join('');
   }
 
@@ -479,7 +479,10 @@
     if (!S.room) { $('home-entry').hidden = false; $('lobby').hidden = true; return; }
     if (!inGame) { S.ui.goDismissed = false; S.prevGame = null; return renderLobby(); }
     if (!boardReady) {
-      Board.init($('board'), { onClick: onTerritoryClick, onHover });
+      Board.init($('board'), {
+        onClick: onTerritoryClick, onHover,
+        onPointer: (x, y, tid) => S.socket.emit('cursor', x == null ? {} : { x, y, tid }),
+      });
       $('zoom-in').onclick = () => Board.zoomIn();
       $('zoom-out').onclick = () => Board.zoomOut();
       $('zoom-fit').onclick = () => Board.zoomReset();
@@ -539,6 +542,12 @@
     if (mine && !wasMyTurn && S.game.turnNumber > 0) toast('Your turn', true);
     wasMyTurn = mine;
   });
+  S.socket.on('cursor', (c) => {
+    if (!boardReady || !S.game || S.game.phase === 'over') return;
+    const p = S.game.players.find((x) => x.id === c.id);
+    if (p) Board.showCursor(c, p);
+  });
+
   S.socket.on('chat', (c) => {
     S.chat.push(c);
     if (S.chat.length > 100) S.chat.shift();

@@ -15,7 +15,7 @@
     return e;
   }
   // Badge radius grows with troop count so strongholds stand out at a glance.
-  const radiusFor = (armies) => Math.min(21, 9.5 + 3 * Math.log2(Math.max(1, armies)));
+  const radiusFor = (armies) => Math.min(22, 11 + 3 * Math.log2(Math.max(1, armies)));
   function textColorFor(hex) {
     const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -43,6 +43,8 @@
       const gLabels = el('g', { class: 'labels' }, svg);
       const gBadges = el('g', {}, svg);
       this.gFx = el('g', { class: 'fx' }, svg);
+      this.gCursors = el('g', { class: 'cursors' }, svg);
+      this.cursors = {};
 
       for (const [a, b, c, d] of GEO.seaRoutes) el('path', { class: 'sea-route', d: `M${a},${b}L${c},${d}` }, gRoutes);
 
@@ -53,7 +55,7 @@
         // continent shelf: a soft halo beneath the land — continent colour, or the holder's colour once it's taken
         const shelf = el('path', { d, class: 'shelf', fill: cc, stroke: cc }, gShelf);
         (this.shelves[t.continent] = this.shelves[t.continent] || []).push(shelf);
-        const path = el('path', { d, class: 'terr', 'data-id': t.id }, gLand);
+        const path = el('path', { d, class: 'terr', 'data-id': t.id, fill: cc }, gLand); // land is coloured by continent
         const [x, y] = GEO.points[t.id];
         const [lx, ly] = (GEO.labelOffsets && GEO.labelOffsets[t.id]) || [0, 21];
         const tag = el('g', { transform: `translate(${x},${y})` }, gLabels);
@@ -82,6 +84,56 @@
         this.contLabels[c] = { tx, holder };
       }
       this.enableZoom(svg);
+      // report our own pointer position (board coordinates) so other players can see it
+      let lastSent = 0, hoverTid = null;
+      const send = (x, y) => { if (handlers.onPointer) handlers.onPointer(x, y, hoverTid); };
+      for (const [id, n] of Object.entries(this.nodes)) {
+        for (const t of [n.path, n.badge]) {
+          t.addEventListener('pointerenter', () => { hoverTid = id; });
+          t.addEventListener('pointerleave', () => { if (hoverTid === id) hoverTid = null; });
+        }
+      }
+      svg.addEventListener('pointermove', (e) => {
+        const now = performance.now();
+        if (now - lastSent < 60) return;
+        lastSent = now;
+        const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+        const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+        send(p.x, p.y);
+      });
+      svg.addEventListener('pointerleave', () => { hoverTid = null; send(null, null); });
+    },
+
+    // ---- other players' live cursors ----
+    showCursor(c, player) {
+      if (!player) return;
+      let cur = this.cursors[c.id];
+      if (!cur) {
+        const g = el('g', { class: 'cursor' }, this.gCursors);
+        const outline = el('path', { class: 'cursor-terr', stroke: player.color }, this.gCursors);
+        this.gCursors.insertBefore(outline, this.gCursors.firstChild);
+        const icon = el('g', {}, g);
+        el('path', { d: 'M0,0 L0,15 L4,11.5 L7,18 L9.6,16.8 L6.7,10.5 L11.5,10.5 Z', class: 'cursor-arrow', fill: player.color }, icon);
+        const tag = el('g', { transform: 'translate(12,18)' }, icon);
+        const bg = el('rect', { rx: 3, height: 13, fill: player.color }, tag);
+        const tx = el('text', { x: 4, y: 9.6, class: 'cursor-name' }, tag);
+        tx.textContent = player.name;
+        cur = this.cursors[c.id] = { g, icon, outline, bg, tx, sized: false, timer: null };
+      }
+      if (!cur.sized) { try { cur.bg.setAttribute('width', cur.tx.getComputedTextLength() + 8); cur.sized = true; } catch (e) { /* not rendered yet */ } }
+      cur.tx.setAttribute('fill', textColorFor(player.color));
+      if (c.x == null) { cur.g.classList.add('gone'); cur.outline.classList.add('gone'); return; }
+      cur.g.classList.remove('gone');
+      cur.g.setAttribute('transform', `translate(${c.x},${c.y})`);
+      cur.icon.setAttribute('transform', `scale(${this.k.toFixed(3)})`);
+      if (c.tid && GEO.paths[c.tid]) { cur.outline.setAttribute('d', GEO.paths[c.tid]); cur.outline.classList.remove('gone'); }
+      else cur.outline.classList.add('gone');
+      clearTimeout(cur.timer);
+      cur.timer = setTimeout(() => { cur.g.classList.add('gone'); cur.outline.classList.add('gone'); }, 5000);
+    },
+    removeCursor(id) {
+      const cur = this.cursors[id]; if (!cur) return;
+      cur.g.remove(); cur.outline.remove(); delete this.cursors[id];
     },
 
     // ---- zoom & pan (wheel / buttons to zoom, drag to pan) ----
@@ -140,7 +192,6 @@
       for (const [id, n] of Object.entries(this.nodes)) {
         const s = view.territories[id];
         const color = colors[s.owner] || '#777';
-        n.path.setAttribute('fill', color);
         // badge: owner-coloured disc, sized by troop count
         const r = radiusFor(s.armies);
         n.circle.setAttribute('r', r.toFixed(1));

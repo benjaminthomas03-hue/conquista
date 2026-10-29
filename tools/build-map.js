@@ -58,7 +58,8 @@ const C = {
   ...Object.fromEntries(['China', 'Taiwan', 'North Korea', 'South Korea', 'Hong Kong', 'Macao'].map((n) => [n, 'china'])),
   'Mongolia': 'mongolia',
   'Japan': 'japan',
-  ...Object.fromEntries(['Myanmar', 'Thailand', 'Laos', 'Cambodia', 'Vietnam', 'Malaysia', 'Singapore'].map((n) => [n, 'siam'])),
+  ...Object.fromEntries(['Myanmar', 'Thailand', 'Laos', 'Cambodia', 'Vietnam', 'Singapore'].map((n) => [n, 'siam'])),
+  'Malaysia': [['siam', [99, 0, 105, 8]], ['indonesia', [108, 0, 120, 8]]], // Malaysian Borneo joins the rest of Borneo
   // Australia / Oceania
   'Indonesia': [['indonesia', [94, -12, 132, 7]], ['newGuinea', [132, -12, 142, 2]]],
   ...Object.fromEntries(['Philippines', 'Brunei', 'Timor-Leste'].map((n) => [n, 'indonesia'])),
@@ -71,6 +72,31 @@ const CONTINENT_BOX = { NA: [-169, 7, -10, 84], SA: [-82, -56, -30, 13], EU: [-2
 
 const box = ([x0, y0, x1, y1]) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]];
 const toMulti = (g) => (g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
+// Drop stray islands: keep the main landmass, big islands, and small islands only when they hug the coast.
+const ISLAND_BIG = 0.12, ISLAND_MIN = 0.01, ISLAND_NEAR_DEG = 1.2;
+function minDistDeg(a, b) {
+  let best = Infinity;
+  const step = Math.max(1, Math.floor((a.length * b.length) / 400000));
+  for (let i = 0; i < a.length; i += step) {
+    const k = Math.cos((a[i][1] * Math.PI) / 180);
+    for (let j = 0; j < b.length; j++) {
+      const d = ((a[i][0] - b[j][0]) * k) ** 2 + (a[i][1] - b[j][1]) ** 2;
+      if (d < best) best = d;
+    }
+  }
+  return Math.sqrt(best);
+}
+function pruneIslands(polys) {
+  const sorted = polys.slice().sort((x, y) => ringArea(y[0]) - ringArea(x[0]));
+  const big = ringArea(sorted[0][0]);
+  const kept = [sorted[0]];
+  for (const p of sorted.slice(1)) {
+    const a = ringArea(p[0]);
+    if (a >= ISLAND_BIG * big) kept.push(p);
+    else if (a >= ISLAND_MIN * big && kept.some((k) => minDistDeg(k[0], p[0]) <= ISLAND_NEAR_DEG)) kept.push(p);
+  }
+  return { kept, dropped: sorted.length - kept.length };
+}
 const ringArea = (r) => { let a = 0; for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return Math.abs(a / 2); };
 
 const parts = {};
@@ -98,9 +124,13 @@ if (missing.length) throw new Error('Territories without land: ' + missing.join(
 const W = 1000;
 const projection = geoMiller().rotate([-11, 0]).precision(0.1);
 const shapes = {};
+const islandReport = [];
 for (const [tid, list] of Object.entries(parts)) {
   let merged = pc.union(...list);
   merged = merged.filter((poly) => ringArea(poly[0]) > 0.12); // drop specks
+  const pr = pruneIslands(merged);
+  if (pr.dropped) islandReport.push(`${tid} -${pr.dropped}`);
+  merged = pr.kept;
   // polygon-clipping winds outer rings counter-clockwise; d3-geo (spherical) expects clockwise
   merged = merged.map((poly) => poly.map((ring) => ring.slice().reverse()));
   shapes[tid] = { type: 'MultiPolygon', coordinates: merged };
@@ -163,4 +193,4 @@ if (typeof module === 'object' && module.exports) module.exports = GEO; else roo
 `;
 fs.writeFileSync(path.join(__dirname, '..', 'shared', 'map-geo.js'), js);
 console.log(`Wrote shared/map-geo.js: ${W}x${H}, ${(js.length / 1024).toFixed(0)} KB, ${out.seaRoutes.length} sea routes`);
-console.log('Unassigned (dropped):', unassigned.join(', '));
+console.log('Stray islands removed:', islandReport.join(', '));
