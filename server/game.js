@@ -290,6 +290,7 @@ class Game {
     this.truces = this.truces.filter((x) => this.turnNumber < x.until);
     this.reinforcements = this.computeReinforcements(p.id);
     this.snapshot();
+    if (this.checkWin(p.id)) return;
     this.addLog(`${p.name}'s turn: ${this.reinforcements} reinforcements.`);
   }
 
@@ -321,6 +322,7 @@ class Game {
       this.step = 'attack'; // also resumes attacking after a forced mid-turn trade
       this.returnToAttack = false;
     }
+    this.checkWin(pid); // e.g. "18 territories with 2 armies" can be completed by placing
     return OK;
   }
 
@@ -355,6 +357,7 @@ class Game {
       msg += ` (+2 on ${this.tname(bonus.territory)})`;
     }
     this.addLog(msg + '.');
+    this.checkWin(pid);
     return OK;
   }
 
@@ -450,6 +453,7 @@ class Game {
     this.territories[pm.to].armies += n;
     this.addEvent({ type: 'move', from: pm.from, to: pm.to, n, pid });
     this.pendingMove = null;
+    this.checkWin(pid);
     return OK;
   }
 
@@ -502,6 +506,7 @@ class Game {
     if (this.step !== 'attack') return fail('You are not in the attack step');
     if (this.pendingMove) return fail('Move armies into your conquered territory first');
     this.step = 'fortify';
+    this.checkWin(pid);
     return OK;
   }
 
