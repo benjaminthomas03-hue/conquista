@@ -99,6 +99,15 @@
               </select>
             </label>
           </div>
+          <div class="field" id="bot-speed-field">
+            <span>Bot speed</span>
+            <div class="seg" id="seg-botspeed" role="radiogroup" aria-label="Bot speed">
+              <button data-v="slow" role="radio">Slow</button>
+              <button data-v="normal" role="radio">Normal</button>
+              <button data-v="fast" role="radio">Fast</button>
+            </div>
+            <small class="field-hint">How long bots pause between moves so everyone can follow</small>
+          </div>
         </fieldset>
         <p id="lobby-hint" class="muted small"></p>
         <div class="lobby-actions">
@@ -116,6 +125,9 @@
       <div id="turn-banner" class="turn-banner"></div>
       <div class="topbar-right">
         <span id="timer" class="timer" hidden></span>
+        <select id="sel-botspeed" class="btn-sm botspeed-select" title="Bot speed (host only)" aria-label="Bot speed" hidden>
+          <option value="slow">Bots: slow</option><option value="normal">Bots: normal</option><option value="fast">Bots: fast</option>
+        </select>
         <button id="btn-sound" class="btn btn-ghost btn-sm" title="Sound effects on or off">Sound</button>
         <button id="btn-alerts" class="btn btn-ghost btn-sm" title="Get a notification when it's your turn and this tab is in the background">Alerts</button>
         <button id="btn-names" class="btn btn-ghost btn-sm" title="Always show territory names (they also appear when you zoom in)">Names</button>

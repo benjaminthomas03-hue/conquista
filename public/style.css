@@ -428,3 +428,5 @@ input::placeholder { color: #6f8c8a; }
 .go-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 @media (max-width: 520px) { .go-stats dl > div { grid-template-columns: 1fr; gap: 2px; } }
 .diplo-panel .offer > span { flex: 1; min-width: 0; }
+
+.botspeed-select { width: auto; padding: 5px 8px; font-size: 13px; background: transparent; border: 1px solid var(--line); border-radius: 8px; }

@@ -25,7 +25,15 @@ const REACTIONS = ['😱', '🔥', '🤝', '😂', '💀', '👀', '🎯', '🛡
 const PRE_GAME_SECONDS = { draft: 30, capitals: 60, setup: 180 };
 const ROOM_IDLE_MS = 6 * 60 * 60 * 1000;
 const BOT_SPEED = Number(process.env.BOT_DELAY_SCALE || 1); // tests set this low to run bot games fast
-const BOT_DELAY = Object.fromEntries(Object.entries({ draft: 450, capitals: 600, setup: 350, playing: 700, attack: 950 }).map(([k, v]) => [k, Math.round(v * BOT_SPEED)]));
+// How long a bot waits before each move (ms, at Normal speed), so humans can follow along.
+const BOT_DELAY = { draft: 900, capitals: 800, setup: 600, attack: 2400, move: 1500, place: 1500, trade: 1600, endAttack: 1100, fortify: 1700, endTurn: 1200, other: 1400 };
+const TURN_START_PAUSE = 1200; // extra pause when a bot's turn begins
+const BOT_SPEEDS = { slow: 1.6, normal: 1, fast: 0.5 };
+function botDelay(room, g, action) {
+  let ms = g.phase === 'playing' ? (BOT_DELAY[action[0]] || BOT_DELAY.other) : BOT_DELAY[g.phase] || BOT_DELAY.other;
+  if (g.phase === 'playing' && g.step === 'reinforce' && !g.placeHistory.length && !g.returnToAttack) ms += TURN_START_PAUSE;
+  return Math.round(ms * (BOT_SPEEDS[room.settings.botSpeed] || 1) * BOT_SPEED);
+}
 
 const app = express();
 app.use(compression());
@@ -45,7 +53,7 @@ function newCode() {
   return c;
 }
 const cleanName = (s) => String(s || '').replace(/[<>]/g, '').trim().slice(0, 18) || 'Commander';
-const DEFAULT_SETTINGS = { mode: 'domination', start: 'random', cards: 'escalating', fog: false, timer: 0 };
+const DEFAULT_SETTINGS = { mode: 'domination', start: 'random', cards: 'escalating', fog: false, timer: 0, botSpeed: 'normal' };
 
 function makeRoom(code) {
   return { code, hostId: null, players: [], spectators: [], settings: { ...DEFAULT_SETTINGS }, game: null, lastActivity: Date.now() };
@@ -142,7 +150,7 @@ function scheduleBots(room) {
   if (!g || g.phase === 'over') return;
   const first = nextBotMove(g);
   if (!first) return;
-  const delay = g.phase === 'playing' ? (first.action[0] === 'attack' ? BOT_DELAY.attack : BOT_DELAY.playing) : BOT_DELAY[g.phase];
+  const delay = botDelay(room, g, first.action);
   room.botTimer = setTimeout(() => {
     if (room.game !== g || g.phase === 'over') return;
     const n = nextBotMove(g);
@@ -255,6 +263,15 @@ io.on('connection', (socket) => {
     if (['escalating', 'fixed'].includes(s.cards)) st.cards = s.cards;
     if (typeof s.fog === 'boolean') st.fog = s.fog;
     if ([0, 60, 90, 120, 180, 300].includes(Number(s.timer))) st.timer = Number(s.timer);
+    if (BOT_SPEEDS[s.botSpeed]) st.botSpeed = s.botSpeed;
+    reply(cb, { ok: true });
+    broadcast(room);
+  });
+
+  // Bot speed can be changed by the host at any time, even mid-game.
+  socket.on('room:botSpeed', ({ speed } = {}, cb) => {
+    if (!isHost() || !BOT_SPEEDS[speed]) return reply(cb, { ok: false, error: 'Only the host can change bot speed' });
+    room.settings.botSpeed = speed;
     reply(cb, { ok: true });
     broadcast(room);
   });
