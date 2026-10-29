@@ -44,6 +44,8 @@ button, input, select { font: inherit; color: inherit; }
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 5px 11px; font-size: 13px; }
 .btn-wide { width: 100%; }
+#btn-names.on { border-color: var(--brass); color: var(--brass-hi); }
+#btn-leave-game.confirm { border-color: rgba(226,104,92,.7); color: #ffd9d4; }
 .btn-danger { border-color: rgba(226,104,92,.5); color: #ffd9d4; }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; border: 0; padding: 0; }
@@ -165,13 +167,63 @@ input::placeholder { color: #6f8c8a; }
 @keyframes march { to { stroke-dashoffset: -18; } }
 @keyframes flash { 0% { filter: brightness(2); } 100% { filter: brightness(1); } }
 .sea-route { vector-effect: non-scaling-stroke; stroke: rgba(225, 240, 236, .35); stroke-width: 1.4; stroke-dasharray: 4 5; fill: none; }
-.badge circle { fill: var(--ink); stroke-width: 2.5; }
+/* troop badges: owner-coloured, sized by troop count (set in board.js) */
+.badge .disc { stroke: #0b1f24; stroke-width: 2; }
 .badge.clickable { cursor: pointer; }
-.badge.dim { opacity: .55; }
-.badge text { font-family: var(--display); font-weight: 800; font-size: 15.5px; fill: #fff; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
-.tlabel { font-family: var(--body); font-size: 9.5px; font-weight: 600; fill: rgba(255,255,255,.88); text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: rgba(8,25,30,.7); stroke-width: 2.5px; }
-.clabel { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: .08em; fill: rgba(231, 239, 235, .5); text-anchor: middle; pointer-events: none; }
-.hide-names .tlabel { display: none; }
+.badge.clickable:hover .disc { stroke: #fff; }
+.badge.dim { opacity: .45; }
+.badge text { font-family: var(--display); font-weight: 800; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.threat-ring { fill: none; stroke: #ff5a4a; stroke-width: 3; stroke-dasharray: 4 3; opacity: 0; }
+.badge.threatened .threat-ring { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .badge.threatened .threat-ring { animation: spin 6s linear infinite; transform-box: fill-box; transform-origin: center; }
+  .pop { transform-box: fill-box; transform-origin: center; }
+  .pop.pop-grow { animation: pop-grow .45s ease-out; }
+  .pop.pop-shake { animation: pop-shake .45s ease-in-out; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pop-grow { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@keyframes pop-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-3px); } 40% { transform: translateX(3px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
+
+/* territory names: hidden at full view to keep the board readable; shown when zoomed in or toggled on */
+.tlabel { display: none; font-family: var(--body); font-size: 9.5px; font-weight: 600; fill: rgba(255,255,255,.92); text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: rgba(8,25,30,.75); stroke-width: 2.5px; }
+.show-names .tlabel, .zoom-names .tlabel { display: block; }
+.clabel { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: .08em; fill: rgba(231, 239, 235, .45); text-anchor: middle; pointer-events: none; }
+.clabel.held { fill: rgba(231, 239, 235, .8); }
+.cholder { font-family: var(--body); font-size: 11.5px; font-weight: 700; letter-spacing: 0; }
+.shelf.held { opacity: .85; stroke-width: 6; }
+
+/* board animations */
+.fx { pointer-events: none; }
+.fx-arrow-casing { fill: none; stroke: rgba(255, 255, 255, .92); stroke-width: 9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fx-arrow-line { fill: none; stroke-width: 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fx-arrow.move .fx-arrow-line { stroke-dasharray: 2 7; stroke-width: 4.5; }
+.fx-arrow-head { stroke: rgba(255, 255, 255, .92); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.fx-arrow { animation: fx-fade 2.6s ease-in forwards; }
+.fx-arrow.move { animation-duration: 2s; }
+.fx-float { font-family: var(--display); font-weight: 800; text-anchor: start; paint-order: stroke; stroke: rgba(4, 18, 22, .85); stroke-width: 3px; animation: fx-rise 1.6s ease-out forwards; }
+.fx-float.small { font-family: var(--body); font-weight: 700; text-anchor: middle; }
+.fx-burst { fill: none; stroke-width: 3; vector-effect: non-scaling-stroke; animation: fx-burst .9s ease-out forwards; }
+@media (prefers-reduced-motion: no-preference) {
+  .fx-arrow.attack .fx-arrow-line { stroke-dasharray: var(--len); stroke-dashoffset: var(--len); animation: fx-draw .35s ease-out forwards; }
+  .fx-arrow.move .fx-arrow-line { animation: march-move .6s linear infinite; }
+}
+@keyframes fx-draw { to { stroke-dashoffset: 0; } }
+@keyframes march-move { to { stroke-dashoffset: -9; } }
+@keyframes fx-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-rise { 0% { opacity: 0; transform: translateY(0); } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(var(--rise)); } }
+@keyframes fx-burst { 0% { r: 6px; opacity: 1; } 100% { r: var(--burst); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fx-float { animation: fx-fade 1.6s forwards; } .fx-burst { animation: fx-fade .9s forwards; } }
+
+/* balance of power */
+.power { margin-top: -4px; }
+.power-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--ink); }
+.power-bar span { display: block; height: 100%; transition: flex-grow .5s; }
+.power-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.threat-note { font-size: 12.5px; color: #ffb3a9; display: flex; gap: 6px; align-items: center; }
+.threat-note .ring { width: 12px; height: 12px; border-radius: 50%; border: 2px dashed #ff5a4a; flex: none; }
+.player-list li { cursor: default; }
+.player-list li:hover { border-color: var(--line); }
 
 /* action panel */
 .panel { background: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }

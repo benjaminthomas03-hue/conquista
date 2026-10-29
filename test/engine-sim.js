@@ -16,6 +16,18 @@ function dispatch(g, pid, [type, p]) {
   }
 }
 
+// Every new game must deal territories differently.
+{
+  const ps = [1, 2, 3, 4].map((k) => ({ id: 'p' + k, name: 'P' + k, color: '#000' }));
+  const seen = new Set();
+  for (let i = 0; i < 500; i++) {
+    const g = new Game(ps);
+    seen.add(Object.keys(g.territories).sort().map((t) => g.territories[t].owner).join(','));
+  }
+  if (seen.size !== 500) throw new Error('Territory deals repeated: only ' + seen.size + ' unique deals out of 500');
+  console.log('Deal randomness: 500 games, 500 different deals');
+}
+
 const N = Number(process.argv[2] || 300);
 const stats = { domination: 0, missions: 0, turns: [], stuck: 0, timeouts: 0, missionWins: {} };
 for (let i = 0; i < N; i++) {

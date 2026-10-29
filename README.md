@@ -10,6 +10,8 @@ An online territory-conquest strategy game for 2–6 friends. You divide a 42-te
 - Optional turn timer from 60 seconds to 5 minutes. When time runs out, remaining armies are placed automatically and the turn ends.
 - Reconnection: refresh or lose Wi-Fi and you rejoin the same seat. The host can skip the turn of a player who has gone offline.
 - Table chat and a running log of battles.
+- Readable at a glance: troop badges in each owner's colour that grow with army size, red rings on your territories facing a bigger enemy stack, continents outlined in the holder's colour, a balance-of-power bar, and hovering a player highlights their territories.
+- Live animations for everyone: attack arrows, troop losses, captures, reinforcements and troop movements.
 - A real world map built from Natural Earth country borders. Zoom with the scroll wheel or the +/− buttons, and drag to pan.
 
 ## Play locally (try it first)
@@ -45,7 +47,7 @@ Alternatives: the app runs anywhere that supports Node and WebSockets, such as R
    - **Fortify:** optionally move armies once between two of your territories connected through your own land. This ends your turn. Or click **End turn**.
 5. Conquer at least one territory in a turn to earn a card. Sets are 3 alike, 3 different, or any 2 plus a wild.
 
-Dashed lines on the map are sea routes. Alaska connects to Kamchatka across the edge of the map. Scroll or use +/− to zoom into crowded areas like Europe, drag to pan, and click **Fit** to see the whole world again.
+Territory names appear when you zoom in, or click **Names** to always show them. To quit a game, click **Leave** at the top right; refreshing the page puts you back into the game you were in. Dashed lines on the map are sea routes. Alaska connects to Kamchatka across the edge of the map. Scroll or use +/− to zoom into crowded areas like Europe, drag to pan, and click **Fit** to see the whole world again.
 
 ## Project layout
 

@@ -79,13 +79,16 @@
       <div id="turn-banner" class="turn-banner"></div>
       <div class="topbar-right">
         <span id="timer" class="timer" hidden></span>
-        <button id="btn-names" class="btn btn-ghost btn-sm" title="Show or hide territory names">Names</button>
+        <button id="btn-names" class="btn btn-ghost btn-sm" title="Always show territory names (they also appear when you zoom in)">Names</button>
         <span class="muted small">Room <strong id="game-code"></strong></span>
+        <button id="btn-leave-game" class="btn btn-ghost btn-sm" title="Leave this game and go back to the start screen">Leave</button>
       </div>
     </header>
 
     <div class="layout">
       <aside class="rail rail-left">
+        <div id="power" class="power"></div>
+        <div id="threat-note" class="threat-note" hidden></div>
         <h2 class="rail-title">Commanders</h2>
         <ul id="player-list" class="player-list"></ul>
         <div id="mission-box" class="mission" hidden>

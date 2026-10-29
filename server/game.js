@@ -16,6 +16,7 @@ class Game {
   constructor(players, options = {}) {
     if (players.length < 2 || players.length > 6) throw new Error('Need 2-6 players');
     this.rng = options.rng || defaultRng;
+    this.gameId = crypto.randomBytes(4).toString('hex'); // lets clients tell a fresh game from a resumed one
     this.mode = options.mode === 'missions' ? 'missions' : 'domination';
     this.players = players.map((p) => ({
       id: p.id, name: p.name, color: p.color, colorName: p.colorName || p.color,
@@ -33,6 +34,8 @@ class Game {
     this.tradeCount = 0;
     this.winner = null;
     this.log = [];
+    this.events = []; // recent board events (placements, battles, moves) for client animations
+    this.eventSeq = 0;
     this.territories = {};
 
     // Turn order is random.
@@ -71,6 +74,11 @@ class Game {
   ownedIds(pid) { return Object.keys(this.territories).filter((t) => this.territories[t].owner === pid); }
   name(pid) { const p = this.player(pid); return p ? p.name : '?'; }
   tname(tid) { return MAP.territories[tid].name; }
+  addEvent(e) {
+    e.seq = ++this.eventSeq;
+    this.events.push(e);
+    if (this.events.length > 40) this.events.shift();
+  }
   addLog(text) {
     this.log.push({ t: Date.now(), text });
     if (this.log.length > 150) this.log.shift();
@@ -106,6 +114,7 @@ class Game {
     if (n <= 0) return fail('You have no armies left to place');
     t.armies += n;
     this.setupRemaining[pid] -= n;
+    this.addEvent({ type: 'place', tid, n, pid });
     if (Object.values(this.setupRemaining).every((v) => v === 0)) this.beginPlay();
     return OK;
   }
@@ -155,6 +164,7 @@ class Game {
     if (n <= 0) return fail('No reinforcements left');
     t.armies += n;
     this.reinforcements -= n;
+    this.addEvent({ type: 'place', tid, n, pid });
     if (this.reinforcements === 0) {
       this.step = 'attack'; // also resumes attacking after a forced mid-turn trade
       this.returnToAttack = false;
@@ -189,6 +199,7 @@ class Game {
     let msg = `${p.name} traded cards for ${value} armies`;
     if (bonus) {
       this.territories[bonus.territory].armies += 2;
+      this.addEvent({ type: 'place', tid: bonus.territory, n: 2, pid });
       msg += ` (+2 on ${this.tname(bonus.territory)})`;
     }
     this.addLog(msg + '.');
@@ -231,6 +242,7 @@ class Game {
       from, to, attacker: pid, defender: defenderId, attDice, defDice,
       attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered, t: Date.now(),
     };
+    this.addEvent({ type: 'battle', from, to, attacker: pid, defender: defenderId, attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered: d.armies === 0 });
     if (blitz) this.addLog(`${this.name(pid)} blitzed ${this.tname(to)} from ${this.tname(from)}: lost ${totalAttLoss}, killed ${totalDefLoss}.`);
 
     if (conquered) {
@@ -255,6 +267,7 @@ class Game {
     if (!(n >= pm.min && n <= pm.max)) return fail(`Move between ${pm.min} and ${pm.max} armies`);
     this.territories[pm.from].armies -= n;
     this.territories[pm.to].armies += n;
+    this.addEvent({ type: 'move', from: pm.from, to: pm.to, n, pid });
     this.pendingMove = null;
     return OK;
   }
@@ -327,6 +340,7 @@ class Game {
     if (!(n >= 1 && n <= a.armies - 1)) return fail(`Move between 1 and ${a.armies - 1} armies`);
     a.armies -= n;
     b.armies += n;
+    this.addEvent({ type: 'move', from, to, n, pid });
     this.addLog(`${this.name(pid)} fortified ${this.tname(to)} with ${n} from ${this.tname(from)}.`);
     this.checkWin(pid);
     if (this.phase === 'playing') this.endTurn(pid);
@@ -386,11 +400,14 @@ class Game {
         if (!set) break;
         this.trade(p.id, set);
       }
-      const owned = this.ownedIds(p.id);
+      const owned = this.ownedIds(p.id), added = {};
       while (this.reinforcements > 0) {
-        this.territories[owned[Math.floor(this.rng() * owned.length)]].armies++;
+        const t = owned[Math.floor(this.rng() * owned.length)];
+        this.territories[t].armies++;
+        added[t] = (added[t] || 0) + 1;
         this.reinforcements--;
       }
+      for (const [tid, n] of Object.entries(added)) this.addEvent({ type: 'place', tid, n, pid: p.id });
       this.returnToAttack = false;
       this.step = 'attack';
     }
@@ -422,6 +439,8 @@ class Game {
       winner: this.winner,
       territories: this.territories,
       log: this.log.slice(-60),
+      events: this.events.slice(-20),
+      gameId: this.gameId,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, color: p.color, colorName: p.colorName, alive: p.alive,
         cardCount: p.cards.length,

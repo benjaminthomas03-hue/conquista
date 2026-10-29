@@ -15,7 +15,7 @@
     code: null, token: null, you: null,
     room: null, game: null, prevGame: null,
     chat: [],
-    ui: { sel: null, target: null, amount: 1, dice: 3, cards: new Set(), names: store.getL('cq:names') !== '0', goDismissed: false, lastBattleT: 0 },
+    ui: { sel: null, target: null, amount: 1, dice: 3, cards: new Set(), names: store.getL('cq:names2') === '1', focus: null, lastSeq: null, gameId: null, goDismissed: false, lastBattleT: 0 },
   };
 
   // ---------- helpers ----------
@@ -51,7 +51,7 @@
   // ---------- joining ----------
   async function joinRoom(code, token) {
     const r = await emit('room:join', { code, token, name: $('in-name').value });
-    if (r.ok) saveSession(r);
+    if (r.ok) { saveSession(r); if (token) S.resumed = true; }
     else if (token) { store.set('cq:' + code, null); }
     return r;
   }
@@ -186,6 +186,18 @@
     tip.hidden = false;
   }
 
+  // Your territories next to a bigger enemy stack (where you're vulnerable).
+  function threatSet() {
+    const g = S.game, out = new Set();
+    if (!g || g.phase !== 'playing' || !me() || !me().alive) return out;
+    for (const id of Object.keys(g.territories)) {
+      if (!owns(id)) continue;
+      const strongest = Math.max(0, ...MAP.territories[id].neighbors.filter((n) => !owns(n)).map((n) => T(n).armies));
+      if (strongest > T(id).armies) out.add(id);
+    }
+    return out;
+  }
+
   function boardUi() {
     const g = S.game, u = S.ui;
     const clickable = new Set(), dim = new Set(), flash = new Set();
@@ -214,7 +226,7 @@
     if (S.prevGame && S.prevGame.phase !== 'setup') {
       for (const id of all) if (S.prevGame.territories[id] && S.prevGame.territories[id].owner !== g.territories[id].owner) flash.add(id);
     }
-    return { clickable, dim, flash, sel: u.sel, target: u.target };
+    return { clickable, dim, flash, sel: u.sel, target: u.target, threats: threatSet(), focus: u.focus };
   }
 
   // ---------- action panel ----------
@@ -364,12 +376,25 @@
 
   function renderPlayers() {
     const g = S.game;
+    const alive = g.players.filter((p) => p.alive);
+    const totalArmies = alive.reduce((a, p) => a + p.armyCount, 0) || 1;
+    $('power').innerHTML = `<h2 class="rail-title">Balance of power</h2>
+      <div class="power-bar" role="img" aria-label="Share of armies by player">${alive.map((p) =>
+        `<span style="flex-grow:${p.armyCount};background:${p.color}" title="${esc(p.name)}: ${p.armyCount} armies (${Math.round(100 * p.armyCount / totalArmies)}%)"></span>`).join('')}</div>
+      <div class="power-legend"><span>Share of all armies</span><span>${totalArmies} total</span></div>`;
+    const threats = threatSet();
+    $('threat-note').hidden = !threats.size;
+    $('threat-note').innerHTML = `<span class="ring"></span><span>${threats.size} of your territories face a bigger enemy stack next door</span>`;
     $('player-list').innerHTML = g.players.map((p) => {
       const lp = S.room.players.find((x) => x.id === p.id);
       const cls = [p.id === g.currentPlayer ? 'current' : '', p.alive ? '' : 'dead', lp && !lp.connected ? 'offline' : ''].join(' ');
-      return `<li class="${cls}"><div class="pname">${dot(p.color)}${esc(p.name)}${p.id === S.you ? '<span class="you">you</span>' : ''}${lp && !lp.connected ? '<span class="you">offline</span>' : ''}</div>
+      return `<li class="${cls}" data-pid="${p.id}" title="Hover to highlight ${esc(p.name)}'s territories"><div class="pname">${dot(p.color)}${esc(p.name)}${p.id === S.you ? '<span class="you">you</span>' : ''}${lp && !lp.connected ? '<span class="you">offline</span>' : ''}</div>
         <div class="stats">${p.alive ? `<span><b>${p.territoryCount}</b> lands</span><span><b>${p.armyCount}</b> armies</span><span><b>${p.cardCount}</b> cards</span>` : '<span>Eliminated</span>'}</div></li>`;
     }).join('');
+    $('player-list').querySelectorAll('li').forEach((li) => {
+      li.onmouseenter = () => { S.ui.focus = li.dataset.pid; Board.update(S.game, S.game.players, boardUi()); };
+      li.onmouseleave = () => { S.ui.focus = null; Board.update(S.game, S.game.players, boardUi()); };
+    });
     const mp = me();
     $('mission-box').hidden = !(mp && mp.mission);
     if (mp && mp.mission) $('mission-text').textContent = mp.mission;
@@ -425,8 +450,7 @@
     $('game-code').textContent = S.room.code;
     renderBanner();
     renderPlayers();
-    const colors = Object.fromEntries(g.players.map((p) => [p.id, p.color]));
-    Board.update(g, colors, boardUi());
+    Board.update(g, g.players, boardUi());
     renderActionPanel();
     renderDice();
     renderHand();
@@ -461,13 +485,43 @@
       $('zoom-fit').onclick = () => Board.zoomReset();
       boardReady = true;
     }
-    $('board').classList.toggle('hide-names', !S.ui.names);
+    $('board').classList.toggle('show-names', S.ui.names);
+    $('btn-names').classList.toggle('on', S.ui.names);
     renderGame();
   }
   $('btn-names').onclick = () => {
     S.ui.names = !S.ui.names;
-    store.setL('cq:names', S.ui.names ? '1' : '0');
-    $('board').classList.toggle('hide-names', !S.ui.names);
+    store.setL('cq:names2', S.ui.names ? '1' : '0');
+    $('board').classList.toggle('show-names', S.ui.names);
+    $('btn-names').classList.toggle('on', S.ui.names);
+  };
+
+  // Animate board events we haven't shown yet (but don't replay history when joining or rejoining).
+  function playNewEvents() {
+    const g = S.game;
+    if (!g || !boardReady) { S.ui.lastSeq = null; S.ui.gameId = null; return; }
+    const evs = g.events || [];
+    const maxSeq = evs.length ? evs[evs.length - 1].seq : 0;
+    if (S.ui.gameId !== g.gameId || S.ui.lastSeq == null) { S.ui.gameId = g.gameId; S.ui.lastSeq = maxSeq; return; }
+    const fresh = evs.filter((e) => e.seq > S.ui.lastSeq);
+    S.ui.lastSeq = maxSeq;
+    if (fresh.length && !document.hidden) Board.animate(fresh, g.players);
+  }
+
+  // Leaving a running game: two clicks to avoid accidents.
+  $('btn-leave-game').onclick = async () => {
+    const b = $('btn-leave-game');
+    if (!b.classList.contains('confirm')) {
+      b.classList.add('confirm'); b.textContent = 'Click again to leave';
+      setTimeout(() => { b.classList.remove('confirm'); b.textContent = 'Leave'; }, 3000);
+      return;
+    }
+    await emit('room:leave');
+    store.set('cq:' + S.code, null);
+    S.code = S.token = S.you = null; S.room = S.game = null;
+    history.replaceState(null, '', location.pathname);
+    b.classList.remove('confirm'); b.textContent = 'Leave';
+    render();
   };
 
   let wasMyTurn = false;
@@ -478,6 +532,9 @@
     S.game = st.game;
     render();
     S.prevGame = S.game; // later local re-renders shouldn't re-flash captures
+    playNewEvents();
+    if (S.resumed && S.game && S.game.phase !== 'over') toast('Rejoined your game in progress. Use Leave to exit it.', true);
+    S.resumed = false;
     const mine = isMyTurn();
     if (mine && !wasMyTurn && S.game.turnNumber > 0) toast('Your turn', true);
     wasMyTurn = mine;
