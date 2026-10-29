@@ -42,7 +42,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
 app.get('/healthz', (_req, res) => res.send('ok'));
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { perMessageDeflate: { threshold: 1024 } }); // compress game updates for slow connections
 const store = createStore();
 
 const rooms = new Map();
@@ -429,7 +429,7 @@ io.on('connection', (socket) => {
   socket.on('cursor', (c = {}) => {
     if (!room || !room.game || !me || spectating) return;
     const now = Date.now();
-    if (now - lastCursor < 50) return;
+    if (now - lastCursor < 80) return;
     lastCursor = now;
     const ok = (v, max) => typeof v === 'number' && isFinite(v) && v >= 0 && v <= max;
     const out = { id: me.id };

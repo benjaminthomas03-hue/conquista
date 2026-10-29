@@ -155,7 +155,8 @@ input::placeholder { color: #6f8c8a; }
   position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 10px;
   background: var(--sea);
 }
-#board { width: 100%; height: 100%; max-height: 100%; display: block; user-select: none; }
+#board { width: 100%; height: 100%; max-height: 100%; display: block; user-select: none; position: relative; z-index: 1; }
+.bg-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; transform-origin: 0 0; }
 .zoom-ctrl { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
 .zoom-ctrl .btn { min-width: 38px; background: rgba(18, 49, 58, .9); font-size: 15px; }
 #board.zoomed { cursor: grab; touch-action: none; }
@@ -166,19 +167,15 @@ input::placeholder { color: #6f8c8a; }
 }
 
 /* map elements */
-.ocean { fill: var(--sea); }
-.graticule { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(205, 232, 228, 0.13); stroke-width: 1; }
-.equator { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(205, 232, 228, 0.22); stroke-width: 1.2; stroke-dasharray: 6 5; }
-.shelf { vector-effect: non-scaling-stroke; stroke-width: 6; stroke-linejoin: round; opacity: .35; }
-.terr { vector-effect: non-scaling-stroke; stroke: rgba(10, 30, 35, .75); stroke-width: 1; stroke-linejoin: round; cursor: default; transition: filter .12s; }
+/* territories: invisible hit areas + highlights (the land is drawn in the canvas behind) */
+.terr { fill: none; stroke: none; pointer-events: fill; cursor: default; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .terr.clickable { cursor: pointer; }
-.terr.clickable:hover { filter: brightness(1.18); }
-.terr.dim { filter: saturate(.35) brightness(.7); }
+.terr.clickable:hover { fill: rgba(255, 246, 222, .18); }
+.terr.dim { fill: rgba(6, 20, 24, .5); }
 .terr.sel { stroke: var(--brass-hi); stroke-width: 3; }
-.terr.target { stroke: #fff; stroke-width: 2.5; stroke-dasharray: 5 4; animation: march 0.8s linear infinite; }
+.terr.target { stroke: #fff; stroke-width: 2.5; stroke-dasharray: 5 4; }
 .terr.flash { animation: flash .9s ease-out; }
-@keyframes march { to { stroke-dashoffset: -18; } }
-@keyframes flash { 0% { filter: brightness(2); } 100% { filter: brightness(1); } }
+@keyframes flash { 0% { fill: rgba(255, 255, 255, .55); } 100% { fill: rgba(255, 255, 255, 0); } }
 .sea-route { vector-effect: non-scaling-stroke; stroke: rgba(244, 236, 214, .9); stroke-width: 2; stroke-dasharray: 5 5; stroke-linecap: round; fill: none; }
 .sea-route-casing { vector-effect: non-scaling-stroke; stroke: rgba(6, 22, 27, .7); stroke-width: 4.5; stroke-linecap: round; fill: none; }
 .route-end { fill: rgba(244, 236, 214, .95); stroke: rgba(6, 22, 27, .7); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -189,7 +186,6 @@ input::placeholder { color: #6f8c8a; }
 .route.lit .sea-route-casing { stroke-width: 6; }
 .route.lit .route-end, .route.lit .route-arrow { fill: var(--brass-hi); stroke: var(--brass-hi); }
 .route.lit .route-label { fill: var(--brass-hi); }
-@media (prefers-reduced-motion: no-preference) { .route.lit .sea-route { animation: route-march .7s linear infinite; } }
 @keyframes route-march { to { stroke-dashoffset: -10; } }
 /* troop badges: owner-coloured, sized by troop count (set in board.js) */
 .badge .disc { stroke: #0b1f24; stroke-width: 2.5; }
@@ -200,7 +196,6 @@ input::placeholder { color: #6f8c8a; }
 .threat-ring { fill: none; stroke: #ff5a4a; stroke-width: 3; stroke-dasharray: 4 3; opacity: 0; }
 .badge.threatened .threat-ring { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .badge.threatened .threat-ring { animation: route-march 1.2s linear infinite; }
   .pop { transform-box: fill-box; transform-origin: center; }
   .pop.pop-grow { animation: pop-grow .45s ease-out; }
   .pop.pop-shake { animation: pop-shake .45s ease-in-out; }
@@ -215,7 +210,6 @@ input::placeholder { color: #6f8c8a; }
 .clabel { font-family: var(--display); font-weight: 400; font-size: 16px; letter-spacing: .06em; fill: rgba(231, 239, 235, .45); text-anchor: middle; pointer-events: none; }
 .clabel.held { fill: rgba(231, 239, 235, .8); }
 .cholder { font-family: var(--body); font-size: 11.5px; font-weight: 700; letter-spacing: 0; }
-.shelf.held { opacity: .85; stroke-width: 6; }
 
 /* board animations */
 .fx { pointer-events: none; }
@@ -243,7 +237,7 @@ input::placeholder { color: #6f8c8a; }
 .cursors { pointer-events: none; }
 .cursor { transition: transform .09s linear, opacity .3s; }
 .cursor.gone, .cursor-terr.gone { opacity: 0; }
-.cursor-arrow { stroke: #fff; stroke-width: 1.4; stroke-linejoin: round; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.6)); }
+.cursor-arrow { stroke: #fff; stroke-width: 1.4; stroke-linejoin: round; }
 .cursor-name { font-family: var(--body); font-size: 9.5px; font-weight: 700; }
 .cursor-terr { fill: none; stroke-width: 3; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; transition: opacity .3s; }
 
@@ -457,12 +451,10 @@ input::placeholder { color: #6f8c8a; }
 @keyframes alarm-pulse { 50% { color: #fff; } }
 
 /* parchment texture over the land + figure markers */
-.paper { mix-blend-mode: multiply; pointer-events: none; }
-.badge .fig { transition: filter .12s; }
-.badge.clickable:hover .fig { filter: brightness(1.15) drop-shadow(0 0 2px rgba(255, 236, 190, .9)); }
-.badge .plaque { fill: #f6ecd2; stroke-width: 1.6; filter: url(#badge-shadow); }
+.badge .plaque { fill: #f6ecd2; stroke-width: 1.6; }
+.badge.clickable:hover .plaque { stroke-width: 2.6; fill: #fff8e6; }
 .badge text.count { font-family: var(--num); font-weight: 800; font-size: 11px; fill: #2a1c0e; text-anchor: middle; dominant-baseline: central; font-variant-numeric: lining-nums tabular-nums; }
-.badge.fogged .fig { opacity: .55; filter: grayscale(.4); }
+.badge.fogged .fig { opacity: .5; }
 .badge .threat-ring { stroke-width: 2.2; }
 
 @media (max-width: 860px) {
@@ -475,3 +467,10 @@ input::placeholder { color: #6f8c8a; }
   .zoom-ctrl { flex-direction: row; justify-self: end; gap: 4px; }
   .zoom-ctrl .btn { min-width: 34px; }
 }
+
+/* fast graphics: fewer effects for slower computers */
+#board.lite .fx-burst { display: none; }
+#board.lite .fx-arrow.move .fx-arrow-line { animation: none; }
+#board.lite .cursor { transition: none; }
+#board.lite .fig-shadow { display: none; }
+#btn-gfx.on { border-color: var(--brass); color: var(--brass-hi); }

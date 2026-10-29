@@ -157,7 +157,8 @@ for (const [tid, list] of Object.entries(parts)) {
     const out = [];
     for (let i = 0; i < ring.length - 1; i++) {
       const [ax, ay] = ring[i], [bx, by] = ring[i + 1];
-      const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / 0.5));
+      // only straight cut lines (constant latitude) need it; coastlines are already detailed
+      const n = Math.abs(by - ay) < 1e-9 ? Math.max(1, Math.ceil(Math.abs(bx - ax) / 0.5)) : 1;
       for (let k = 0; k < n; k++) out.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n]);
     }
     out.push(ring[ring.length - 1]);

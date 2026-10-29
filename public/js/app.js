@@ -232,15 +232,24 @@
   }
 
   const tip = $('tooltip');
+  let tipId = null, tipKey = null, tipPos = null, tipRaf = 0;
   function onHover(id, e) {
-    if (!id || !S.game) { tip.hidden = true; return; }
-    const t = MAP.territories[id], s = T(id), p = playerById(s.owner);
+    if (!id || !S.game) { tip.hidden = true; tipId = null; return; }
+    tipPos = { x: e.clientX, y: e.clientY };
+    if (!tipRaf) tipRaf = requestAnimationFrame(() => {
+      tipRaf = 0;
+      if (!tipPos || tip.hidden) return;
+      const box = tip.parentNode.getBoundingClientRect();
+      tip.style.left = Math.min(tipPos.x - box.left + 14, box.width - 220) + 'px';
+      tip.style.top = (tipPos.y - box.top + 14) + 'px';
+    });
+    const sNow = T(id), key = id + ':' + sNow.owner + ':' + sNow.armies;
+    if (tipId === id && tipKey === key) { tip.hidden = false; return; }
+    tipId = id; tipKey = key;
+    const t = MAP.territories[id], s = sNow, p = playerById(s.owner);
     const capOf = S.game.capitals && Object.keys(S.game.capitals).find((k) => S.game.capitals[k] === id);
     const troops = !s.owner ? 'unclaimed' : s.armies == null ? 'troops hidden by fog' : `${s.armies} ${s.armies === 1 ? 'army' : 'armies'}`;
     tip.innerHTML = `<b>${esc(t.name)}</b> · ${troops}${p ? ' · ' + esc(p.name) : ''}<br><span class="muted">${MAP.CONTINENTS[t.continent].name}${capOf ? ` · ★ ${esc(playerById(capOf).name)}'s capital` : ''}</span>`;
-    const box = $('screen-game').querySelector('.board-wrap').getBoundingClientRect();
-    tip.style.left = Math.min(e.clientX - box.left + 14, box.width - 220) + 'px';
-    tip.style.top = (e.clientY - box.top + 14) + 'px';
     tip.hidden = false;
   }
 
@@ -767,6 +776,7 @@
         onClick: onTerritoryClick, onHover,
         onPointer: (x, y, tid) => { if (!S.spectator) S.socket.emit('cursor', x == null ? {} : { x, y, tid }); },
       });
+      initGraphics();
       $('zoom-in').onclick = () => Board.zoomIn();
       $('zoom-out').onclick = () => Board.zoomOut();
       $('zoom-fit').onclick = () => Board.zoomReset();
@@ -782,6 +792,40 @@
     $('btn-alerts').classList.toggle('on', Sound.alerts);
     renderGame();
   }
+  // ---------- graphics quality ----------
+  // 'full' or 'fast'. Unless the player chose, slow computers are detected and switched to fast automatically.
+  function applyGfx(mode) {
+    Board.setLite(mode === 'fast');
+    $('btn-gfx').textContent = mode === 'fast' ? 'Graphics: fast' : 'Graphics: full';
+    $('btn-gfx').classList.toggle('on', mode === 'fast');
+  }
+  function initGraphics() {
+    const chosen = local.get('cq:gfx');
+    if (chosen) return applyGfx(chosen);
+    const weak = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2) || (navigator.deviceMemory && navigator.deviceMemory <= 2);
+    applyGfx(weak ? 'fast' : 'full');
+    if (weak) return;
+    // measure real smoothness for a moment after the board appears
+    setTimeout(() => {
+      const frames = []; let last = performance.now(), n = 0;
+      const tick = (t) => {
+        frames.push(t - last); last = t;
+        if (++n < 75 && !document.hidden) requestAnimationFrame(tick);
+        else {
+          frames.sort((a, b) => a - b);
+          const median = frames[Math.floor(frames.length / 2)];
+          if (median > 34 && !local.get('cq:gfx')) { applyGfx('fast'); toast('Switched to fast graphics for smoother play. You can change it with the Graphics button.', true); }
+        }
+      };
+      requestAnimationFrame(tick);
+    }, 1500);
+  }
+  $('btn-gfx').onclick = () => {
+    const next = Board.lite ? 'full' : 'fast';
+    local.set('cq:gfx', next);
+    applyGfx(next);
+  };
+
   $('btn-names').onclick = () => {
     S.ui.names = !S.ui.names;
     local.set('cq:names2', S.ui.names ? '1' : '0');

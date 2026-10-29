@@ -34,29 +34,22 @@
       svg.innerHTML = '';
       svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
       const defs = el('defs', {}, svg);
-      const f = el('filter', { id: 'shadow', x: '-10%', y: '-10%', width: '120%', height: '120%' }, defs);
-      el('feDropShadow', { dx: 0, dy: 1.5, stdDeviation: 2.5, 'flood-color': '#04161b', 'flood-opacity': 0.6 }, f);
-      const bf = el('filter', { id: 'badge-shadow', x: '-50%', y: '-50%', width: '200%', height: '200%' }, defs);
-      el('feDropShadow', { dx: 0, dy: 1, stdDeviation: 1.2, 'flood-color': '#000', 'flood-opacity': 0.55 }, bf);
-      // aged-paper texture: soft relief + paper grain + faint stains, multiplied over the land (static, so drawn once)
-      defs.insertAdjacentHTML('beforeend', `
-        <filter id="paper" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
-          <feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="5" seed="8" result="h"/>
-          <feDiffuseLighting in="h" surfaceScale="5" lighting-color="#fff8ec" result="light"><feDistantLight azimuth="225" elevation="48"/></feDiffuseLighting>
-          <feComponentTransfer in="light" result="relief"><feFuncR type="linear" slope=".18" intercept=".88"/><feFuncG type="linear" slope=".18" intercept=".87"/><feFuncB type="linear" slope=".18" intercept=".84"/></feComponentTransfer>
-          <feTurbulence type="fractalNoise" baseFrequency=".004" numOctaves="3" seed="21" result="st"/>
-          <feColorMatrix in="st" type="matrix" values="0 0 0 0 .62  0 0 0 0 .5  0 0 0 0 .32  1.1 0 0 0 -.5" result="stains"/>
-          <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="2" result="grain"/>
-          <feColorMatrix in="grain" values="0 0 0 0 .3  0 0 0 0 .22  0 0 0 0 .12  0 0 0 .16 0" result="grainC"/>
-          <feMerge result="m"><feMergeNode in="relief"/><feMergeNode in="stains"/><feMergeNode in="grainC"/></feMerge>
-          <feComposite in="m" in2="SourceAlpha" operator="in"/>
-        </filter>
-        <radialGradient id="figShadowG"><stop offset="0" stop-color="#1c1006" stop-opacity=".5"/><stop offset="1" stop-color="#1c1006" stop-opacity="0"/></radialGradient>`);
+      defs.insertAdjacentHTML('beforeend', `<radialGradient id="figShadowG"><stop offset="0" stop-color="#1c1006" stop-opacity=".5"/><stop offset="1" stop-color="#1c1006" stop-opacity="0"/></radialGradient>`);
 
-      el('rect', { class: 'ocean', x: 0, y: 0, width: W, height: H }, svg);
-      el('path', { d: GEO.graticule, class: 'graticule' }, svg);
-      if (GEO.equator) el('path', { d: GEO.equator, class: 'equator' }, svg);
-      const gShelf = el('g', { filter: 'url(#shadow)' }, svg);
+      // The static map (sea, grid, continent glow, land, parchment, borders) is drawn into a canvas behind
+      // the SVG: drawn once per view, so zooming, hovering and animations don't redraw the whole map.
+      this.canvas = document.createElement('canvas');
+      this.canvas.className = 'bg-canvas';
+      svg.parentNode.insertBefore(this.canvas, svg);
+      this.P = { terr: {}, all: new Path2D(Object.values(GEO.paths).join('')), grat: new Path2D(GEO.graticule), eq: GEO.equator ? new Path2D(GEO.equator) : null };
+      for (const id of Object.keys(MAP.territories)) this.P.terr[id] = new Path2D(GEO.paths[id]);
+      this.shelfCols = {};
+      for (const c of Object.keys(MAP.CONTINENTS)) this.shelfCols[c] = { col: MAP.CONTINENTS[c].color, held: false };
+      this.paper = new Image();
+      this.paper.onload = () => this.renderBg();
+      this.paper.src = 'paper.jpg';
+      new ResizeObserver(() => this.scheduleBg(0)).observe(svg.parentNode);
+
       const gCont = el('g', {}, svg);
       const gLand = el('g', {}, svg);
       const gRoutes = el('g', { class: 'routes' }, svg); // above the land so routes over land stay visible
@@ -89,14 +82,12 @@
         this.routes.push({ g, a, b });
       }
 
-      this.shelves = {};
       for (const t of Object.values(MAP.territories)) {
         const d = GEO.paths[t.id];
         const cc = MAP.CONTINENTS[t.continent].color;
-        // continent shelf: a soft halo beneath the land — continent colour, or the holder's colour once it's taken
-        const shelf = el('path', { d, class: 'shelf', fill: cc, stroke: cc }, gShelf);
-        (this.shelves[t.continent] = this.shelves[t.continent] || []).push(shelf);
-        const path = el('path', { d, class: 'terr', 'data-id': t.id, fill: cc }, gLand); // land is coloured by continent
+        void cc;
+        // invisible hit area + highlight layer (the land itself is drawn in the canvas)
+        const path = el('path', { d, class: 'terr', 'data-id': t.id }, gLand);
         const [x, y] = GEO.points[t.id];
         const [lx, ly] = (GEO.labelOffsets && GEO.labelOffsets[t.id]) || [0, 21];
         const tag = el('g', { transform: `translate(${x},${y})` }, gLabels);
@@ -107,7 +98,7 @@
         // army marker: a figure (infantry 1-4, horseman 5-9, cannon 10+) with the count on a plaque
         const ring = el('ellipse', { class: 'threat-ring', cx: 0, cy: FEET, rx: 16, ry: 6 }, pop);
         el('ellipse', { class: 'fig-shadow', cx: 0, cy: FEET - 0.5, rx: 11, ry: 3.4, fill: 'url(#figShadowG)' }, pop);
-        const circle = el('circle', { class: 'disc', r: 7, filter: 'url(#badge-shadow)' }, pop); // only for unclaimed (draft)
+        const circle = el('circle', { class: 'disc', r: 7 }, pop); // only for unclaimed (draft)
         const fig = el('image', { class: 'fig', preserveAspectRatio: 'xMidYMax meet' }, pop);
         const plaque = el('rect', { class: 'plaque', rx: 7, height: 14 }, pop);
         const text = el('text', { class: 'count' }, pop);
@@ -123,9 +114,6 @@
         this.nodes[t.id] = { path, circle, ring, text, star, badge, pop, tag, x, y, fig, plaque, armies: null, figKey: null };
       }
 
-      // one static texture layer over all the land (cheaper than filtering each territory)
-      const paper = el('path', { d: Object.values(GEO.paths).join(''), class: 'paper', fill: '#fff', filter: 'url(#paper)' });
-      gLand.parentNode.insertBefore(paper, gRoutes);
 
       this.contLabels = {};
       for (const [c, [x, y]] of Object.entries(GEO.continentLabels || {})) {
@@ -147,7 +135,7 @@
       }
       svg.addEventListener('pointermove', (e) => {
         const now = performance.now();
-        if (now - lastSent < 60) return;
+        if (now - lastSent < 80) return;
         lastSent = now;
         const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
         const p = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -217,6 +205,7 @@
           n.badge.setAttribute('transform', tr);
           n.tag.setAttribute('transform', tr);
         }
+        this.onView();
       };
       const toBoard = (cx, cy) => {
         const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
@@ -276,6 +265,8 @@
     // ui: { clickable, sel, target, dim, flash, threats:Set, focus:playerId|null }
     // players: [{id, name, color}]
     update(view, players, ui) {
+      const set = (e, k, v) => { const c = e.__a || (e.__a = {}); if (c[k] !== v) { c[k] = v; e.setAttribute(k, v); } };
+      const show = (e, on) => { const v = on ? '' : 'none'; if (e.__d !== v) { e.__d = v; e.style.display = v; } };
       const colors = Object.fromEntries(players.map((p) => [p.id, p.color]));
       for (const [id, n] of Object.entries(this.nodes)) {
         const s = view.territories[id];
@@ -283,8 +274,8 @@
         const fogged = s.armies == null && !unclaimed; // fog of war: owner known, troops hidden
         const color = unclaimed ? '#55696d' : colors[s.owner] || '#777';
         // marker: figure by army size (infantry 1-4, horseman 5-9, cannon 10+), count on a plaque
-        n.circle.style.display = unclaimed ? '' : 'none';
-        n.circle.setAttribute('fill', color);
+        show(n.circle, unclaimed);
+        set(n.circle, 'fill', color);
         const kind = figKind(fogged ? 1 : s.armies || 1);
         const key = `${kind}-${color.slice(1)}`;
         let w = 14, fh = FIG_H[kind];
@@ -298,22 +289,22 @@
             n.figKey = key;
           }
         }
-        n.fig.style.display = unclaimed ? 'none' : '';
-        n.ring.setAttribute('rx', (w / 2 + 5).toFixed(1));
+        show(n.fig, !unclaimed);
+        set(n.ring, 'rx', (w / 2 + 5).toFixed(1));
         const label = unclaimed ? '' : fogged ? '?' : s.armies > 0 ? String(s.armies) : '…'; // 0 only while armies are moving in
-        n.text.textContent = label;
+        if (n.text.__t !== label) { n.text.__t = label; n.text.textContent = label; }
         const pw = 9 + label.length * 6.6, px = w / 2 - 4, py = FEET - 10;
-        n.plaque.style.display = unclaimed ? 'none' : '';
-        n.plaque.setAttribute('x', px.toFixed(1)); n.plaque.setAttribute('y', py.toFixed(1)); n.plaque.setAttribute('width', pw.toFixed(1));
-        n.plaque.setAttribute('stroke', color);
-        n.text.setAttribute('x', (px + pw / 2).toFixed(1)); n.text.setAttribute('y', (py + 7.3).toFixed(1));
+        show(n.plaque, !unclaimed);
+        set(n.plaque, 'x', px.toFixed(1)); set(n.plaque, 'y', py.toFixed(1)); set(n.plaque, 'width', pw.toFixed(1));
+        set(n.plaque, 'stroke', color);
+        set(n.text, 'x', (px + pw / 2).toFixed(1)); set(n.text, 'y', (py + 7.3).toFixed(1));
         n.badge.classList.toggle('fogged', fogged);
         n.badge.classList.toggle('unclaimed', unclaimed);
         const capOwner = view.capitals && Object.keys(view.capitals).find((pid) => view.capitals[pid] === id);
-        n.star.style.display = capOwner ? '' : 'none';
+        show(n.star, !!capOwner);
         if (capOwner) {
-          n.star.setAttribute('transform', `translate(${(-w / 2 - 2).toFixed(1)},${(FEET - fh + 4).toFixed(1)}) scale(1.25)`);
-          n.star.setAttribute('fill', colors[capOwner] || '#fff');
+          set(n.star, 'transform', `translate(${(-w / 2 - 2).toFixed(1)},${(FEET - fh + 4).toFixed(1)}) scale(1.25)`);
+          set(n.star, 'fill', colors[capOwner] || '#fff');
         }
         n.armies = s.armies;
         const cl = n.path.classList;
@@ -327,7 +318,7 @@
         n.badge.classList.toggle('threatened', !!(ui.threats && ui.threats.has(id)));
         if (ui.flash.has(id)) { cl.remove('flash'); void n.path.getBBox(); cl.add('flash'); }
         // keep selected shapes on top so their outline is visible
-        if (ui.sel === id || ui.target === id) n.path.parentNode.appendChild(n.path);
+        if ((ui.sel === id || ui.target === id) && n.path.parentNode.lastChild !== n.path) n.path.parentNode.appendChild(n.path);
       }
       this.ui = ui;
       this.highlightRoutes();
@@ -337,14 +328,78 @@
         const held = ids.every((t) => view.territories[t].owner === owner);
         const p = held && players.find((x) => x.id === owner);
         const col = p ? p.color : MAP.CONTINENTS[c].color;
-        for (const sh of this.shelves[c]) { sh.setAttribute('stroke', col); sh.setAttribute('fill', col); sh.classList.toggle('held', !!p); }
+        const sc = this.shelfCols[c];
+        if (sc.col !== col || sc.held !== !!p) { sc.col = col; sc.held = !!p; this.scheduleBg(0); }
         const lab = this.contLabels[c];
         if (lab) {
-          lab.holder.textContent = p ? `held by ${p.name}` : '';
-          lab.holder.setAttribute('fill', p ? p.color : 'transparent');
+          const ht = p ? `held by ${p.name}` : '';
+          if (lab.holder.textContent !== ht) lab.holder.textContent = ht;
+          set(lab.holder, 'fill', p ? p.color : 'transparent');
           lab.tx.classList.toggle('held', !!p);
         }
       }
+    },
+
+    // ---- static map canvas ----
+    setLite(on) { this.lite = !!on; this.svg.classList.toggle('lite', this.lite); this.scheduleBg(0); },
+    scheduleBg(delay) {
+      clearTimeout(this.bgTimer);
+      this.bgTimer = setTimeout(() => requestAnimationFrame(() => this.renderBg()), delay);
+    },
+    // While zooming or panning, just stretch the last drawing (cheap), then redraw it sharp once the view settles.
+    onView() {
+      if (!this.baked) return;
+      const m = this.svg.getScreenCTM(); if (!m) return;
+      const r = this.canvas.parentNode.getBoundingClientRect();
+      const s = m.a / this.baked.a;
+      const tx = (m.e - r.left) - s * this.baked.e, ty = (m.f - r.top) - s * this.baked.f;
+      this.canvas.style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px) scale(${s.toFixed(4)})`;
+      this.scheduleBg(160);
+    },
+    renderBg() {
+      const c = this.canvas, svg = this.svg;
+      const r = c.parentNode.getBoundingClientRect();
+      const m = svg.getScreenCTM();
+      if (!m || !r.width || !r.height) return;
+      const dpr = this.lite ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const cw = Math.round(r.width * dpr), ch = Math.round(r.height * dpr);
+      if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+      const ctx = c.getContext('2d');
+      const css = getComputedStyle(document.documentElement);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = css.getPropertyValue('--sea').trim() || '#164551';
+      ctx.fillRect(0, 0, cw, ch);
+      const k = m.a * dpr; // board units -> device pixels
+      ctx.setTransform(k, 0, 0, k, (m.e - r.left) * dpr, (m.f - r.top) * dpr);
+      const px = dpr / k; // one CSS pixel in board units
+      // latitude/longitude grid and equator
+      ctx.lineWidth = px; ctx.strokeStyle = 'rgba(205, 232, 228, 0.13)'; ctx.stroke(this.P.grat);
+      if (this.P.eq) { ctx.setLineDash([6 * px, 5 * px]); ctx.strokeStyle = 'rgba(205, 232, 228, 0.22)'; ctx.lineWidth = 1.2 * px; ctx.stroke(this.P.eq); ctx.setLineDash([]); }
+      // continent glow (holder's colour once a continent is held), with a soft shadow
+      ctx.save();
+      if (!this.lite) { ctx.shadowColor = 'rgba(4, 22, 27, 0.6)'; ctx.shadowBlur = 5 * dpr; ctx.shadowOffsetY = 1.5 * dpr; }
+      ctx.lineJoin = 'round';
+      for (const [cont, ids] of Object.entries(MAP.continentTerritories)) {
+        const sc = this.shelfCols[cont];
+        ctx.globalAlpha = sc.held ? 0.85 : 0.35;
+        ctx.fillStyle = ctx.strokeStyle = sc.col;
+        ctx.lineWidth = (sc.held ? 6 : 6) * px;
+        for (const id of ids) { ctx.fill(this.P.terr[id]); ctx.stroke(this.P.terr[id]); }
+      }
+      ctx.restore();
+      // land, coloured by continent
+      for (const t of Object.values(MAP.territories)) { ctx.fillStyle = MAP.CONTINENTS[t.continent].color; ctx.fill(this.P.terr[t.id]); }
+      // parchment texture
+      if (!this.lite && this.paper.complete && this.paper.naturalWidth) {
+        ctx.save(); ctx.clip(this.P.all); ctx.globalCompositeOperation = 'multiply';
+        ctx.drawImage(this.paper, 0, 0, W, H);
+        ctx.restore();
+      }
+      // borders
+      ctx.lineWidth = px; ctx.strokeStyle = 'rgba(10, 30, 35, 0.75)'; ctx.lineJoin = 'round';
+      for (const id of Object.keys(this.P.terr)) ctx.stroke(this.P.terr[id]);
+      this.baked = { a: m.a, e: m.e - r.left, f: m.f - r.top };
+      c.style.transform = '';
     },
 
     // Light up the sea routes of the selected territory (or the one under the pointer).
