@@ -1,33 +1,47 @@
 // Conquista game engine. Pure rules, no networking. The server is authoritative:
 // every action is validated here and returns { ok: true } or { ok: false, error }.
+//
+// Phases: draft (optional) -> capitals (capitals mode only) -> setup -> playing -> over
 const crypto = require('crypto');
 const MAP = require('../shared/map');
+const ODDS = require('../shared/odds');
 const { dealMissions, missionComplete, ownsContinent, shuffle } = require('./missions');
 
 const START_ARMIES = { 2: 40, 3: 35, 4: 30, 5: 25, 6: 20 };
 const SYMBOLS = ['infantry', 'cavalry', 'artillery'];
 const TRADE_VALUES = [4, 6, 8, 10, 12, 15];
+const FIXED_VALUES = { infantry: 4, cavalry: 6, artillery: 8, mixed: 10 };
+const TERR_IDS = Object.keys(MAP.territories);
 
 const defaultRng = () => crypto.randomInt(0, 2 ** 32) / 2 ** 32;
 const fail = (error) => ({ ok: false, error });
 const OK = { ok: true };
+const MODE_NAMES = { domination: 'World domination', missions: 'Secret missions', capitals: 'Capitals' };
 
 class Game {
+  // players: [{ id, name, color, colorName, bot? }]
+  // options: { mode: 'domination'|'missions'|'capitals', start: 'random'|'draft', cards: 'escalating'|'fixed', fog: bool, rng }
   constructor(players, options = {}) {
     if (players.length < 2 || players.length > 6) throw new Error('Need 2-6 players');
     this.rng = options.rng || defaultRng;
     this.gameId = crypto.randomBytes(4).toString('hex'); // lets clients tell a fresh game from a resumed one
-    this.mode = options.mode === 'missions' ? 'missions' : 'domination';
+    this.settings = {
+      mode: MODE_NAMES[options.mode] ? options.mode : 'domination',
+      start: options.start === 'draft' ? 'draft' : 'random',
+      cards: options.cards === 'fixed' ? 'fixed' : 'escalating',
+      fog: !!options.fog,
+    };
+    this.mode = this.settings.mode;
     this.players = players.map((p) => ({
-      id: p.id, name: p.name, color: p.color, colorName: p.colorName || p.color,
-      alive: true, cards: [], mission: null, eliminatedBy: null,
+      id: p.id, name: p.name, color: p.color, colorName: p.colorName || p.color, bot: p.bot || null,
+      alive: true, cards: [], mission: null, eliminatedBy: null, betrayals: 0,
     }));
-    this.phase = 'setup';
     this.step = null;
     this.turnIndex = 0;
     this.turnNumber = 0;
     this.reinforcements = 0;
     this.conqueredThisTurn = false;
+    this.attacksThisTurn = 0;
     this.pendingMove = null;
     this.returnToAttack = false;
     this.lastBattle = null;
@@ -37,25 +51,22 @@ class Game {
     this.events = []; // recent board events (placements, battles, moves) for client animations
     this.eventSeq = 0;
     this.territories = {};
+    this.capitals = {};        // capitals mode: playerId -> territoryId
+    this.truces = [];          // { a, b, until } — breakable, public
+    this.truceOffers = [];     // { id, from, to, rounds, t } — private to the two players
+    this.placeHistory = [];    // undo stack for this turn's reinforcements: [{ tid, n }]
+    this.setupHistory = {};    // undo stacks during setup, per player
+    this.pickCount = 0;        // draft picks made (also used as a timer key)
+    this.stats = { biggestBattle: null, perPlayer: {} };
+    this.history = [];         // per-turn snapshots for the end-of-game recap / replay
 
     // Turn order is random.
     this.players = shuffle(this.players, this.rng);
-
-    // Deal territories round-robin from a shuffled list.
-    const ids = shuffle(Object.keys(MAP.territories), this.rng);
-    ids.forEach((tid, i) => {
-      this.territories[tid] = { owner: this.players[i % this.players.length].id, armies: 1 };
-    });
-
-    // Remaining starting armies are placed simultaneously during setup.
-    const start = START_ARMIES[this.players.length];
-    this.setupRemaining = {};
-    for (const p of this.players) this.setupRemaining[p.id] = start - this.ownedIds(p.id).length;
+    for (const p of this.players) this.stats.perPlayer[p.id] = { conquests: 0, kills: 0, losses: 0, luck: 0 };
 
     // Card deck: one per territory plus two wilds.
-    const terrIds = Object.keys(MAP.territories);
     this.deck = shuffle(
-      terrIds.map((t, i) => ({ id: t, territory: t, symbol: SYMBOLS[i % 3] }))
+      TERR_IDS.map((t, i) => ({ id: t, territory: t, symbol: SYMBOLS[i % 3] }))
         .concat([{ id: 'wild1', territory: null, symbol: 'wild' }, { id: 'wild2', territory: null, symbol: 'wild' }]),
       this.rng
     );
@@ -65,15 +76,44 @@ class Game {
       const missions = dealMissions(this.players, this.rng);
       for (const p of this.players) p.mission = missions[p.id];
     }
-    this.addLog(`Game started (${this.mode === 'missions' ? 'Secret missions' : 'World domination'}). Place your starting armies.`);
+
+    const extras = [this.settings.start === 'draft' && 'draft start', this.settings.cards === 'fixed' && 'fixed card values', this.settings.fog && 'fog of war']
+      .filter(Boolean);
+    this.addLog(`Game started: ${MODE_NAMES[this.mode]}${extras.length ? ' with ' + extras.join(', ') : ''}.`);
+
+    if (this.settings.start === 'draft') {
+      for (const t of TERR_IDS) this.territories[t] = { owner: null, armies: 0 };
+      this.phase = 'draft';
+      this.turnIndex = 0;
+      this.addLog(`Draft: take turns claiming territories. ${this.players[0].name} picks first.`);
+    } else {
+      // Deal territories round-robin from a freshly shuffled list.
+      shuffle(TERR_IDS, this.rng).forEach((tid, i) => {
+        this.territories[tid] = { owner: this.players[i % this.players.length].id, armies: 1 };
+      });
+      this.afterTerritoriesAssigned();
+    }
+  }
+
+  // ---------- persistence ----------
+  toJSON() {
+    const o = {};
+    for (const [k, v] of Object.entries(this)) if (k !== 'rng') o[k] = v;
+    return o;
+  }
+  static fromJSON(o) {
+    const g = Object.assign(Object.create(Game.prototype), o);
+    g.rng = defaultRng;
+    return g;
   }
 
   // ---------- helpers ----------
   player(pid) { return this.players.find((p) => p.id === pid); }
   get current() { return this.players[this.turnIndex]; }
-  ownedIds(pid) { return Object.keys(this.territories).filter((t) => this.territories[t].owner === pid); }
+  ownedIds(pid) { return TERR_IDS.filter((t) => this.territories[t].owner === pid); }
   name(pid) { const p = this.player(pid); return p ? p.name : '?'; }
   tname(tid) { return MAP.territories[tid].name; }
+  timerKey() { return this.phase === 'draft' ? 'draft:' + this.pickCount : this.phase + ':' + this.turnNumber; }
   addEvent(e) {
     e.seq = ++this.eventSeq;
     this.events.push(e);
@@ -88,8 +128,18 @@ class Game {
     for (let i = 0; i < n; i++) d.push(1 + Math.floor(this.rng() * 6));
     return d.sort((a, b) => b - a);
   }
+  static setValue(cards) {
+    const syms = cards.map((c) => c.symbol).filter((s) => s !== 'wild');
+    if (syms.length === 3 && new Set(syms).size === 1) return FIXED_VALUES[syms[0]];
+    if (syms.length === 2 && syms[0] === syms[1]) return FIXED_VALUES[syms[0]];
+    return FIXED_VALUES.mixed;
+  }
   nextTradeValue() {
+    if (this.settings.cards === 'fixed') return null; // depends on the set
     return this.tradeCount < TRADE_VALUES.length ? TRADE_VALUES[this.tradeCount] : 15 + 5 * (this.tradeCount - 5);
+  }
+  tradeValue(cards) {
+    return this.settings.cards === 'fixed' ? Game.setValue(cards) : this.nextTradeValue();
   }
   computeReinforcements(pid) {
     const owned = this.ownedIds(pid).length;
@@ -101,6 +151,57 @@ class Game {
     if (this.phase !== 'playing') return 'The game is not in progress';
     if (this.current.id !== pid) return 'It is not your turn';
     return null;
+  }
+  truceBetween(a, b) { return this.truces.find((t) => (t.a === a && t.b === b) || (t.a === b && t.b === a)); }
+
+  // ---------- draft ----------
+  draftPick(pid, tid) {
+    if (this.phase !== 'draft') return fail('The draft is over');
+    if (this.current.id !== pid) return fail('It is not your pick');
+    const t = this.territories[tid];
+    if (!t) return fail('Unknown territory');
+    if (t.owner) return fail('That territory is already taken');
+    t.owner = pid; t.armies = 1;
+    this.pickCount++;
+    this.addEvent({ type: 'place', tid, n: 1, pid });
+    if (TERR_IDS.every((x) => this.territories[x].owner)) {
+      this.addLog('Draft complete.');
+      this.turnIndex = 0;
+      this.afterTerritoriesAssigned();
+    } else {
+      this.turnIndex = (this.turnIndex + 1) % this.players.length;
+    }
+    return OK;
+  }
+
+  afterTerritoriesAssigned() {
+    const start = START_ARMIES[this.players.length];
+    this.setupRemaining = {};
+    for (const p of this.players) {
+      this.setupRemaining[p.id] = Math.max(0, start - this.ownedIds(p.id).length);
+      this.setupHistory[p.id] = [];
+    }
+    if (this.mode === 'capitals') {
+      this.phase = 'capitals';
+      this.addLog('Everyone chooses a capital: one of your territories. Hold every capital to win.');
+    } else {
+      this.phase = 'setup';
+      this.addLog('Place your starting armies.');
+    }
+  }
+
+  // ---------- capitals ----------
+  chooseCapital(pid, tid) {
+    if (this.phase !== 'capitals') return fail('Capitals have already been chosen');
+    const t = this.territories[tid];
+    if (!t || t.owner !== pid) return fail('Choose one of your own territories');
+    if (this.capitals[pid]) return fail('You already chose a capital');
+    this.capitals[pid] = tid;
+    if (this.players.every((p) => this.capitals[p.id])) {
+      this.phase = 'setup';
+      this.addLog('Capitals chosen: ' + this.players.map((p) => `${p.name} in ${this.tname(this.capitals[p.id])}`).join(', ') + '. Place your starting armies.');
+    }
+    return OK;
   }
 
   // ---------- setup ----------
@@ -114,6 +215,7 @@ class Game {
     if (n <= 0) return fail('You have no armies left to place');
     t.armies += n;
     this.setupRemaining[pid] -= n;
+    this.setupHistory[pid].push({ tid, n });
     this.addEvent({ type: 'place', tid, n, pid });
     if (Object.values(this.setupRemaining).every((v) => v === 0)) this.beginPlay();
     return OK;
@@ -122,12 +224,43 @@ class Game {
   beginPlay() {
     this.phase = 'playing';
     this.turnIndex = 0;
+    this.setupHistory = {};
     this.addLog('All armies deployed. Let the conquest begin!');
     this.startTurn();
   }
 
-  // Used when a turn timer runs out during setup: scatter remaining armies.
+  // ---------- undo ----------
+  canUndo(pid) {
+    if (this.phase === 'setup') return !!(this.setupHistory[pid] && this.setupHistory[pid].length);
+    if (this.phase !== 'playing' || this.current.id !== pid || this.pendingMove) return false;
+    if (this.step === 'reinforce') return this.placeHistory.length > 0;
+    return this.step === 'attack' && this.attacksThisTurn === 0 && this.placeHistory.length > 0 && !this.returnToAttack;
+  }
+  undoPlace(pid) {
+    if (!this.canUndo(pid)) return fail('Nothing to undo');
+    const stack = this.phase === 'setup' ? this.setupHistory[pid] : this.placeHistory;
+    const last = stack.pop();
+    this.territories[last.tid].armies -= last.n;
+    if (this.phase === 'setup') this.setupRemaining[pid] += last.n;
+    else { this.reinforcements += last.n; this.step = 'reinforce'; }
+    this.addEvent({ type: 'place', tid: last.tid, n: -last.n, pid });
+    return OK;
+  }
+
+  // Used when a timer runs out before play starts: finish the current pre-game step automatically.
   autoCompleteSetup() {
+    if (this.phase === 'draft') {
+      const free = TERR_IDS.filter((t) => !this.territories[t].owner);
+      return this.draftPick(this.current.id, free[Math.floor(this.rng() * free.length)]);
+    }
+    if (this.phase === 'capitals') {
+      for (const p of this.players) {
+        if (this.capitals[p.id]) continue;
+        const owned = this.ownedIds(p.id);
+        this.chooseCapital(p.id, owned[Math.floor(this.rng() * owned.length)]);
+      }
+      return;
+    }
     if (this.phase !== 'setup') return;
     for (const p of this.players) {
       const owned = this.ownedIds(p.id);
@@ -145,11 +278,28 @@ class Game {
     this.turnNumber++;
     this.step = 'reinforce';
     this.conqueredThisTurn = false;
+    this.attacksThisTurn = 0;
     this.pendingMove = null;
     this.returnToAttack = false;
     this.lastBattle = null;
+    this.placeHistory = [];
+    // truces that have run their course
+    for (const t of this.truces.filter((x) => this.turnNumber >= x.until)) {
+      this.addLog(`The truce between ${this.name(t.a)} and ${this.name(t.b)} has ended.`);
+    }
+    this.truces = this.truces.filter((x) => this.turnNumber < x.until);
     this.reinforcements = this.computeReinforcements(p.id);
+    this.snapshot();
     this.addLog(`${p.name}'s turn: ${this.reinforcements} reinforcements.`);
+  }
+
+  snapshot() {
+    const idx = Object.fromEntries(this.players.map((p, i) => [p.id, i]));
+    this.history.push({
+      turn: this.turnNumber,
+      owners: TERR_IDS.map((t) => idx[this.territories[t].owner]),
+      armies: TERR_IDS.map((t) => this.territories[t].armies),
+    });
   }
 
   place(pid, tid, n = 1) {
@@ -164,6 +314,7 @@ class Game {
     if (n <= 0) return fail('No reinforcements left');
     t.armies += n;
     this.reinforcements -= n;
+    this.placeHistory.push({ tid, n });
     this.addEvent({ type: 'place', tid, n, pid });
     if (this.reinforcements === 0) {
       this.step = 'attack'; // also resumes attacking after a forced mid-turn trade
@@ -189,7 +340,7 @@ class Game {
     const cards = cardIds.map((id) => p.cards.find((c) => c.id === id));
     if (cards.some((c) => !c)) return fail('You do not hold those cards');
     if (!Game.isValidSet(cards)) return fail('Not a valid set: need 3 alike, 3 different, or a wild');
-    const value = this.nextTradeValue();
+    const value = this.tradeValue(cards);
     this.tradeCount++;
     this.reinforcements += value;
     p.cards = p.cards.filter((c) => !cardIds.includes(c.id));
@@ -207,11 +358,16 @@ class Game {
   }
 
   findSet(cards) {
+    let best = null, bestVal = -1;
     for (let i = 0; i < cards.length; i++)
       for (let j = i + 1; j < cards.length; j++)
-        for (let k = j + 1; k < cards.length; k++)
-          if (Game.isValidSet([cards[i], cards[j], cards[k]])) return [cards[i].id, cards[j].id, cards[k].id];
-    return null;
+        for (let k = j + 1; k < cards.length; k++) {
+          const set = [cards[i], cards[j], cards[k]];
+          if (!Game.isValidSet(set)) continue;
+          const v = this.settings && this.settings.cards === 'fixed' ? Game.setValue(set) : 0;
+          if (v > bestVal) { bestVal = v; best = set.map((c) => c.id); }
+        }
+    return best;
   }
 
   attack(pid, from, to, dice = 3, blitz = false) {
@@ -226,30 +382,54 @@ class Game {
     if (a.armies < 2) return fail('You need at least 2 armies to attack');
     const defenderId = d.owner;
 
+    // Breaking a truce is allowed, but everyone hears about it.
+    const truce = this.truceBetween(pid, defenderId);
+    if (truce) {
+      this.truces = this.truces.filter((t) => t !== truce);
+      this.player(pid).betrayals++;
+      this.addLog(`⚠ ${this.name(pid)} broke their truce with ${this.name(defenderId)}!`);
+      this.addEvent({ type: 'betrayal', attacker: pid, defender: defenderId });
+    }
+
+    const sa = this.stats.perPlayer[pid], sd = this.stats.perPlayer[defenderId];
     let totalAttLoss = 0, totalDefLoss = 0, rounds = 0, attDice, defDice, usedDice;
     do {
       usedDice = Math.max(1, Math.min(blitz ? 3 : Math.floor(Number(dice)) || 3, 3, a.armies - 1));
       attDice = this.roll(usedDice);
       defDice = this.roll(Math.min(2, d.armies));
+      const exp = ODDS.expectedLosses(attDice.length, defDice.length);
+      let al = 0, dl = 0;
       for (let i = 0; i < Math.min(attDice.length, defDice.length); i++) {
-        if (attDice[i] > defDice[i]) { d.armies--; totalDefLoss++; } else { a.armies--; totalAttLoss++; }
+        if (attDice[i] > defDice[i]) { d.armies--; dl++; } else { a.armies--; al++; }
       }
+      totalAttLoss += al; totalDefLoss += dl;
+      // luck = kills above expectation (attacker) and losses avoided (defender)
+      sa.luck += dl - exp.def; sd.luck += exp.def - dl;
       rounds++;
     } while (blitz && d.armies > 0 && a.armies >= 2);
+    this.attacksThisTurn++;
+    sa.kills += totalDefLoss; sa.losses += totalAttLoss;
+    sd.kills += totalAttLoss; sd.losses += totalDefLoss;
 
     const conquered = d.armies === 0;
+    const size = totalAttLoss + totalDefLoss;
+    if (!this.stats.biggestBattle || size > this.stats.biggestBattle.size) {
+      this.stats.biggestBattle = { size, attacker: pid, defender: defenderId, to, turn: this.turnNumber, attLoss: totalAttLoss, defLoss: totalDefLoss };
+    }
     this.lastBattle = {
       from, to, attacker: pid, defender: defenderId, attDice, defDice,
       attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered, t: Date.now(),
     };
-    this.addEvent({ type: 'battle', from, to, attacker: pid, defender: defenderId, attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered: d.armies === 0 });
+    this.addEvent({ type: 'battle', from, to, attacker: pid, defender: defenderId, attLoss: totalAttLoss, defLoss: totalDefLoss, rounds, conquered });
     if (blitz) this.addLog(`${this.name(pid)} blitzed ${this.tname(to)} from ${this.tname(from)}: lost ${totalAttLoss}, killed ${totalDefLoss}.`);
 
     if (conquered) {
       d.owner = pid;
       d.armies = 0;
       this.conqueredThisTurn = true;
-      this.addLog(`${this.name(pid)} conquered ${this.tname(to)} from ${this.name(defenderId)}.`);
+      sa.conquests++;
+      const capOf = Object.keys(this.capitals).find((k) => this.capitals[k] === to);
+      this.addLog(`${this.name(pid)} conquered ${this.tname(to)} from ${this.name(defenderId)}${capOf ? ` — ${this.name(capOf)}'s capital!` : ''}.`);
       const min = usedDice, max = a.armies - 1;
       this.pendingMove = { from, to, min: Math.min(min, max), max };
       if (this.pendingMove.min >= this.pendingMove.max) this.moveAfterConquest(pid, this.pendingMove.max);
@@ -277,24 +457,32 @@ class Game {
     const def = this.player(defenderId), att = this.player(attackerId);
     def.alive = false;
     def.eliminatedBy = attackerId;
+    this.truces = this.truces.filter((t) => t.a !== defenderId && t.b !== defenderId);
+    this.truceOffers = this.truceOffers.filter((o) => o.from !== defenderId && o.to !== defenderId);
     this.addLog(`${def.name} has been eliminated by ${att.name}!`);
     if (def.cards.length) {
       att.cards.push(...def.cards);
       this.addLog(`${att.name} takes ${def.cards.length} card(s) from ${def.name}.`);
       def.cards = [];
     }
-    // Missions targeting the eliminated player fall back to 24 territories if someone else did it.
     if (this.phase === 'playing' && att.cards.length >= 6 && !this.isOverAfter(attackerId)) {
       this.step = 'reinforce';
       this.returnToAttack = true;
       this.reinforcements = 0;
+      this.placeHistory = [];
       this.addLog(`${att.name} holds ${att.cards.length} cards and must trade before continuing.`);
     }
   }
 
+  holdsAllCapitals(pid) {
+    const caps = Object.values(this.capitals);
+    return caps.length > 0 && caps.every((t) => this.territories[t].owner === pid);
+  }
+
   isOverAfter(pid) {
     return this.players.filter((p) => p.alive).length <= 1 ||
-      (this.mode === 'missions' && missionComplete(this, pid));
+      (this.mode === 'missions' && missionComplete(this, pid)) ||
+      (this.mode === 'capitals' && this.holdsAllCapitals(pid));
   }
 
   // Ends the reinforce step only for the forced-trade-after-elimination case.
@@ -369,10 +557,11 @@ class Game {
   checkWin(pid) {
     if (this.phase === 'over') return true;
     const alive = this.players.filter((p) => p.alive);
-    let winner = null;
-    if (alive.length === 1) winner = alive[0];
-    else if (this.mode === 'missions' && pid && missionComplete(this, pid)) winner = this.player(pid);
-    else if (this.mode === 'domination' && pid && this.ownedIds(pid).length === 42) winner = this.player(pid);
+    let winner = null, how = '';
+    if (alive.length === 1) { winner = alive[0]; how = 'as the last commander standing'; }
+    else if (this.mode === 'missions' && pid && missionComplete(this, pid)) { winner = this.player(pid); how = ': ' + winner.mission.text; }
+    else if (this.mode === 'domination' && pid && this.ownedIds(pid).length === 42) { winner = this.player(pid); how = 'by conquering the world'; }
+    else if (this.mode === 'capitals' && pid && this.holdsAllCapitals(pid)) { winner = this.player(pid); how = 'by holding every capital'; }
     if (winner) {
       this.phase = 'over';
       this.winner = winner.id;
@@ -382,7 +571,8 @@ class Game {
         this.territories[pm.to].armies += pm.max;
         this.pendingMove = null;
       }
-      this.addLog(`🏆 ${winner.name} wins${winner.mission ? ': ' + winner.mission.text : ' by conquering the world'}!`);
+      this.snapshot();
+      this.addLog(`🏆 ${winner.name} wins ${how}!`.replace(' :', ':'));
       return true;
     }
     return false;
@@ -390,7 +580,7 @@ class Game {
 
   // Called when the turn timer expires (or the host skips an absent player).
   autoPlayTurn() {
-    if (this.phase === 'setup') return this.autoCompleteSetup();
+    if (this.phase === 'draft' || this.phase === 'capitals' || this.phase === 'setup') return this.autoCompleteSetup();
     if (this.phase !== 'playing') return;
     const p = this.current;
     if (this.pendingMove) this.moveAfterConquest(p.id, this.pendingMove.min);
@@ -415,38 +605,89 @@ class Game {
     this.endTurn(p.id);
   }
 
-  removePlayer(pid) {
-    // A player who leaves for good: their territories stay, they just get skipped (auto-turns).
-    const p = this.player(pid);
-    if (p) p.left = true;
+  // ---------- diplomacy (breakable truces) ----------
+  proposeTruce(from, to, rounds) {
+    if (this.phase !== 'playing') return fail('Truces can only be agreed during play');
+    const a = this.player(from), b = this.player(to);
+    if (!a || !b || !a.alive || !b.alive || from === to) return fail('Pick another commander who is still in the game');
+    if (this.truceBetween(from, to)) return fail(`You already have a truce with ${b.name}`);
+    if (this.truceOffers.some((o) => (o.from === from && o.to === to) || (o.from === to && o.to === from))) return fail('An offer between you two is already waiting for an answer');
+    rounds = Math.max(1, Math.min(5, Math.floor(Number(rounds)) || 2));
+    const offer = { id: crypto.randomBytes(4).toString('hex'), from, to, rounds, t: Date.now() };
+    this.truceOffers.push(offer);
+    return { ok: true, offer };
+  }
+  respondTruce(pid, offerId, accept) {
+    const o = this.truceOffers.find((x) => x.id === offerId);
+    if (!o || o.to !== pid) return fail('That offer is no longer open');
+    this.truceOffers = this.truceOffers.filter((x) => x !== o);
+    if (!accept) return { ok: true, declined: true, offer: o };
+    const alive = this.players.filter((p) => p.alive).length;
+    this.truces.push({ a: o.from, b: o.to, until: this.turnNumber + o.rounds * alive, rounds: o.rounds });
+    this.addLog(`🤝 ${this.name(o.from)} and ${this.name(o.to)} agreed a truce for ${o.rounds} round${o.rounds > 1 ? 's' : ''}.`);
+    return { ok: true, offer: o };
   }
 
   // ---------- views ----------
+  // Fog of war: you only see troop counts on your own territories and their neighbours.
+  visibleSet(pid) {
+    if (!this.settings.fog || this.phase === 'over' || this.phase === 'draft' || this.phase === 'capitals') return null; // everything visible
+    const vis = new Set();
+    for (const t of TERR_IDS) {
+      if (this.territories[t].owner !== pid) continue;
+      vis.add(t);
+      for (const n of MAP.territories[t].neighbors) vis.add(n);
+    }
+    return vis;
+  }
+
   viewFor(pid) {
     const over = this.phase === 'over';
+    const vis = this.visibleSet(pid);
+    const territories = {};
+    for (const t of TERR_IDS) {
+      const s = this.territories[t];
+      territories[t] = !vis || vis.has(t) ? s : { owner: s.owner, armies: null };
+    }
+    const hide = (p) => vis && p.id !== pid;
+    const events = this.events.slice(-20).filter((e) => !vis
+      || (e.type === 'place' && vis.has(e.tid)) || (e.type === 'move' && vis.has(e.to))
+      || e.type === 'battle' || e.type === 'betrayal')
+      .map((e) => (vis && e.type === 'battle' ? { ...e, attLoss: vis.has(e.from) ? e.attLoss : 0, defLoss: vis.has(e.to) ? e.defLoss : 0 } : e));
+    const alive = this.players.filter((p) => p.alive).length;
     return {
       mode: this.mode,
+      settings: this.settings,
       phase: this.phase,
       step: this.step,
       turnNumber: this.turnNumber,
-      currentPlayer: this.phase === 'playing' ? this.current.id : null,
+      currentPlayer: this.phase === 'playing' || this.phase === 'draft' ? this.current.id : null,
       reinforcements: this.reinforcements,
       setupRemaining: this.setupRemaining,
       pendingMove: this.pendingMove,
       returnToAttack: this.returnToAttack,
-      lastBattle: this.lastBattle,
+      lastBattle: vis && this.lastBattle && !(vis.has(this.lastBattle.from) || vis.has(this.lastBattle.to)) ? null : this.lastBattle,
       nextTradeValue: this.nextTradeValue(),
+      canUndo: pid ? this.canUndo(pid) : false,
       winner: this.winner,
-      territories: this.territories,
+      territories,
+      fogged: !!vis,
+      // capitals stay secret until everyone has chosen
+      capitals: this.phase === 'capitals' ? (this.capitals[pid] ? { [pid]: this.capitals[pid] } : {}) : this.capitals,
+      truces: this.truces.map((t) => ({ a: t.a, b: t.b, roundsLeft: Math.max(1, Math.ceil((t.until - this.turnNumber) / Math.max(1, alive))) })),
+      truceOffers: this.truceOffers.filter((o) => o.from === pid || o.to === pid),
       log: this.log.slice(-60),
-      events: this.events.slice(-20),
+      events,
       gameId: this.gameId,
+      recap: over ? { history: this.history, stats: this.stats, territoryOrder: TERR_IDS } : undefined,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, color: p.color, colorName: p.colorName, alive: p.alive,
+        id: p.id, name: p.name, color: p.color, colorName: p.colorName, alive: p.alive, bot: p.bot,
+        betrayals: p.betrayals,
         cardCount: p.cards.length,
         territoryCount: this.ownedIds(p.id).length,
-        armyCount: this.ownedIds(p.id).reduce((s, t) => s + this.territories[t].armies, 0),
-        income: p.alive ? this.computeReinforcements(p.id) : 0,
+        armyCount: hide(p) ? null : this.ownedIds(p.id).reduce((s, t) => s + this.territories[t].armies, 0),
+        income: hide(p) || !p.alive || this.phase !== 'playing' ? null : this.computeReinforcements(p.id),
+        capitalChosen: !!this.capitals[p.id],
         cards: p.id === pid ? p.cards : undefined,
         mission: (p.id === pid || over) && p.mission ? p.mission.text : undefined,
       })),
@@ -454,4 +695,4 @@ class Game {
   }
 }
 
-module.exports = { Game, START_ARMIES };
+module.exports = { Game, START_ARMIES, TERR_IDS };

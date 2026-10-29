@@ -17,6 +17,15 @@ function nextAction(v, me) {
   const T = v.territories;
   const mine = Object.keys(T).filter((t) => T[t].owner === me);
   const border = mine.filter((t) => MAP.territories[t].neighbors.some((n) => T[n].owner !== me));
+  const armies = (t) => (T[t].armies == null ? 3 : T[t].armies); // fog of war hides some counts
+  if (v.phase === 'draft') {
+    if (v.currentPlayer !== me) return null;
+    return ['draftPick', { territory: pick(Object.keys(T).filter((t) => !T[t].owner)) }];
+  }
+  if (v.phase === 'capitals') {
+    if (v.capitals[me]) return null;
+    return ['capital', { territory: pick(mine) }];
+  }
   if (v.phase === 'setup') {
     if (v.setupRemaining[me] > 0) return ['placeSetup', { territory: pick(border.length ? border : mine), count: Math.min(3, v.setupRemaining[me]) }];
     return null;
@@ -37,7 +46,7 @@ function nextAction(v, me) {
     const options = [];
     for (const f of mine) {
       if (T[f].armies < 3) continue;
-      for (const n of MAP.territories[f].neighbors) if (T[n].owner !== me && T[n].armies < T[f].armies) options.push([f, n]);
+      for (const n of MAP.territories[f].neighbors) if (T[n].owner !== me && armies(n) < T[f].armies) options.push([f, n]);
     }
     if (options.length && Math.random() < 0.95) {
       const [f, n] = pick(options);
