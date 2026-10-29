@@ -153,10 +153,7 @@ input::placeholder { color: #6f8c8a; }
 
 .board-wrap {
   position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 10px;
-  background:
-    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 50px 50px,
-    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 50px 50px,
-    var(--sea);
+  background: var(--sea);
 }
 #board { width: 100%; height: 100%; max-height: 100%; display: block; user-select: none; }
 .zoom-ctrl { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
@@ -169,7 +166,9 @@ input::placeholder { color: #6f8c8a; }
 }
 
 /* map elements */
-.graticule { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(190, 225, 222, 0.09); stroke-width: .8; }
+.ocean { fill: var(--sea); }
+.graticule { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(205, 232, 228, 0.13); stroke-width: 1; }
+.equator { vector-effect: non-scaling-stroke; fill: none; stroke: rgba(205, 232, 228, 0.22); stroke-width: 1.2; stroke-dasharray: 6 5; }
 .shelf { vector-effect: non-scaling-stroke; stroke-width: 6; stroke-linejoin: round; opacity: .35; }
 .terr { vector-effect: non-scaling-stroke; stroke: rgba(10, 30, 35, .75); stroke-width: 1; stroke-linejoin: round; cursor: default; transition: filter .12s; }
 .terr.clickable { cursor: pointer; }

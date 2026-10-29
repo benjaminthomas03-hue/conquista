@@ -35,7 +35,9 @@
       const bf = el('filter', { id: 'badge-shadow', x: '-50%', y: '-50%', width: '200%', height: '200%' }, defs);
       el('feDropShadow', { dx: 0, dy: 1, stdDeviation: 1.2, 'flood-color': '#000', 'flood-opacity': 0.55 }, bf);
 
+      el('rect', { class: 'ocean', x: 0, y: 0, width: W, height: H }, svg);
       el('path', { d: GEO.graticule, class: 'graticule' }, svg);
+      if (GEO.equator) el('path', { d: GEO.equator, class: 'equator' }, svg);
       const gShelf = el('g', { filter: 'url(#shadow)' }, svg);
       const gCont = el('g', {}, svg);
       const gLand = el('g', {}, svg);
