@@ -43,10 +43,10 @@ class PgStore {
       throw e;
     }
   }
-  // Debounced: many quick actions become one write.
+  // Batched: many quick actions become one write, but every change is written within ~1s
+  // even during non-stop activity (the pending write always saves the room's latest state).
   save(room) {
-    if (this.disabled) return;
-    clearTimeout(this.timers.get(room.code));
+    if (this.disabled || this.timers.has(room.code)) return;
     this.timers.set(room.code, setTimeout(() => {
       this.timers.delete(room.code);
       const data = JSON.stringify(serializeRoom(room));
@@ -67,6 +67,7 @@ class PgStore {
   }
   async remove(code) {
     clearTimeout(this.timers.get(code));
+    this.timers.delete(code);
     await this.pool.query('delete from conquista_rooms where code = $1', [code]).catch(() => {});
   }
 }

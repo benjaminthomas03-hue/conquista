@@ -4,17 +4,29 @@ An online territory-conquest strategy game for 2–6 friends. You divide a 42-te
 
 ## Features
 
-- Live multiplayer for 2–6 players. Rooms use a 5-letter code and an invite link.
-- **World domination** mode (conquer all 42 territories) or **Secret missions** mode (each player gets a hidden objective).
-- Classic rules: reinforcements (territories ÷ 3, minimum 3, plus continent bonuses), card sets (4, 6, 8, 10, 12, 15, then +5 each time), +2 bonus armies for a traded territory you own, attacker rolls up to 3 dice and defender up to 2 with ties going to the defender, blitz attacks, one fortify move per turn, and taking an eliminated player's cards.
-- Optional turn timer from 60 seconds to 5 minutes. When time runs out, remaining armies are placed automatically and the turn ends.
-- Reconnection: refresh or lose Wi-Fi and you rejoin the same seat. The host can skip the turn of a player who has gone offline.
-- Table chat and a running log of battles.
-- Readable at a glance: troop badges in each owner's colour that grow with army size, red rings on your territories facing a bigger enemy stack, continents outlined in the holder's colour, a balance-of-power bar, and hovering a player highlights their territories.
-- Live cursors: see where the other players are pointing, with the territory under their cursor outlined in their colour.
-- Each continent has its own colour; troop badges show the owner's colour.
-- Live animations for everyone: attack arrows, troop losses, captures, reinforcements and troop movements.
-- A real world map built from Natural Earth country borders. Zoom with the scroll wheel or the +/− buttons, and drag to pan.
+**Game modes and rules (chosen by the host in the lobby)**
+- **Victory:** World domination (conquer all 42 territories), Secret missions (a hidden objective each), or **Capitals**, an optional mode where everyone secretly picks a capital and you win by holding every capital.
+- **Starting territories:** a random deal, or a **draft** where players take turns claiming territories.
+- **Card sets:** escalating values (4, 6, 8, 10, 12, 15, then +5 each time) or fixed values (infantry 4, cavalry 6, artillery 8, mixed 10).
+- **Fog of war (optional):** you only see troop counts on your own territories and the ones next to them.
+- Classic rules otherwise: reinforcements (territories ÷ 3, minimum 3, plus continent bonuses), +2 bonus armies for a traded territory you own, attacker rolls up to 3 dice and defender up to 2 with ties going to the defender, blitz attacks, one fortify move per turn, and taking an eliminated player's cards.
+- **Undo** a placement before you finish reinforcing.
+- Optional turn timer from 60 seconds to 5 minutes.
+
+**Players**
+- 2–6 seats, filled by friends or by **AI bots** on Easy, Normal or Hard. Hard bots chase continents, missions and capitals.
+- **Spectators:** anyone who opens the link after the game has started (or clicks **Watch**) can follow along and chat.
+- **Saved games:** with a database connected, games survive server restarts and you can finish another day. Your games are listed on the start screen with a **Resume** button.
+
+**At the table**
+- **Battle odds:** before you roll, see your chance to conquer with a blitz and the odds for the next single roll.
+- **Diplomacy:** private messages, plus truce offers for 1–5 rounds. Truces can be broken, but the betrayal is announced to everyone and marked with 🗡 next to the betrayer's name.
+- **Live cursors** for everyone, the territory under each cursor outlined, and **emoji reactions** you can drop on the map (click one, then click the map, or press 1–8 while pointing).
+- **Sound effects** for dice, captures and betrayals, and **turn alerts**: a chime, plus a browser notification when it's your turn and the tab is in the background.
+- **Readable at a glance:** continent-coloured land, troop badges in each owner's colour that grow with army size, red rings on your territories facing a bigger enemy stack, continents outlined in the holder's colour, and a balance-of-power bar. Hovering a player highlights their territories.
+- **Animations** for attacks, losses, captures, reinforcements and troop movements.
+- **End-of-game recap:** a chart of each player's armies over time, the biggest battle, luckiest and unluckiest dice, most conquests, broken truces, and a turn-by-turn **replay** of the whole game.
+- A real world map built from Natural Earth borders, with zoom (scroll, pinch or +/−) and drag-to-pan.
 
 ## Play locally (try it first)
 
@@ -34,7 +46,17 @@ Open http://localhost:3000. To try multiplayer on your own machine, open a secon
 3. Pick your repository. Render reads `render.yaml` and sets everything up. Click **Apply**.
 4. After a minute or two you get a URL like `https://conquista-xxxx.onrender.com`. That's your game. Send it to your friends.
 
-**Free-tier note:** Render puts free apps to sleep after about 15 minutes with no visitors. The first person to open the link waits around 30–60 seconds while it wakes up, and then it's fast. Games live in memory, so a game in progress is lost if the server sleeps or restarts. During a live session it stays awake.
+**Free-tier note:** Render puts free apps to sleep after about 15 minutes with no visitors. The first person to open the link waits around 30–60 seconds while it wakes up, and then it's fast.
+
+### Saved games (recommended)
+
+Without a database, games live in memory and are lost if the server sleeps or restarts. To keep them:
+
+1. Create a free project at [supabase.com](https://supabase.com), choosing a US West region (Render's free servers run in Oregon).
+2. Click **Connect** → **Connection string** → **Session pooler**, copy the URI and put your database password into it.
+3. In Render, open the service → **Environment** → add `DATABASE_URL` with that URI. Render redeploys, and the logs show `saved games enabled`.
+
+The game creates its own table (`conquista_rooms`) and removes rooms that have been idle for 21 days.
 
 Alternatives: the app runs anywhere that supports Node and WebSockets, such as Railway, Fly.io or a small VPS. The start command is `npm start`, and the server listens on the `PORT` environment variable.
 
@@ -59,9 +81,13 @@ shared/map-geo.js   Generated real-world territory shapes (built by tools/build-
 tools/build-map.js  Builds the map shapes by merging and splitting Natural Earth countries
 server/game.js      Rules engine. Server-authoritative, so every move is validated here
 server/missions.js  Secret mission definitions and win checks
-server/index.js     Web server, rooms, Socket.IO events, turn timer
-public/             Browser client (index.html, style.css, js/board.js, js/app.js)
-test/               Bot players and automated full-game simulations (npm test)
+server/index.js     Web server, rooms, Socket.IO events, turn timer, bot driver, diplomacy, spectators
+server/ai.js        AI bots (Easy / Normal / Hard)
+server/store.js     Saved games in Postgres (enabled by DATABASE_URL)
+shared/odds.js      Exact battle odds (used by the odds preview, bots and luck stats)
+public/             Browser client (index.html, style.css, js/app.js, js/board.js, js/recap.js, js/sound.js)
+test/               Rule checks, full bot games across every option, end-to-end socket games (npm test),
+                    and a saved-games test (DATABASE_URL=... node test/persist-test.js)
 ```
 
 To change rules, edit `server/game.js`. Connections between territories live in `shared/map.js`. Which real countries make up each territory, badge positions and label placement are set in `tools/build-map.js`; run `npm run build:map` after editing it. Map data: [Natural Earth](https://www.naturalearthdata.com) (public domain), via the `world-atlas` package.

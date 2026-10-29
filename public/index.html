@@ -18,6 +18,10 @@
       <p class="tagline">Divide the world among 2–6 friends. Hold it with dice and nerve.</p>
 
       <div id="home-entry">
+        <div id="my-games" class="my-games" hidden>
+          <h2 class="rail-title">Your games</h2>
+          <ul id="my-games-list"></ul>
+        </div>
         <label class="field">
           <span>Your name</span>
           <input id="in-name" maxlength="18" autocomplete="nickname" placeholder="e.g. Benjamin">
@@ -27,6 +31,7 @@
         <div class="join-row">
           <input id="in-code" maxlength="5" placeholder="Room code" autocomplete="off" spellcheck="false">
           <button id="btn-join" class="btn">Join</button>
+          <button id="btn-watch" class="btn btn-ghost" title="Watch a game without playing">Watch</button>
         </div>
       </div>
 
@@ -39,6 +44,14 @@
           <button id="btn-copy" class="btn btn-ghost">Copy invite link</button>
         </div>
         <ul id="lobby-players" class="lobby-players"></ul>
+        <div id="bot-row" class="bot-row">
+          <select id="sel-bot" aria-label="Bot difficulty">
+            <option value="easy">Easy bot</option>
+            <option value="normal" selected>Normal bot</option>
+            <option value="hard">Hard bot</option>
+          </select>
+          <button id="btn-add-bot" class="btn">Add bot</button>
+        </div>
         <div class="field">
           <span>Your colour</span>
           <div id="color-swatches" class="swatches"></div>
@@ -46,22 +59,45 @@
         <fieldset id="lobby-settings" class="settings">
           <div class="field">
             <span>Victory</span>
-            <div class="seg" id="seg-mode">
-              <button data-mode="domination">World domination</button>
-              <button data-mode="missions">Secret missions</button>
+            <div class="seg seg-3" id="seg-mode">
+              <button data-v="domination" title="Conquer all 42 territories">World domination</button>
+              <button data-v="missions" title="Each player gets a hidden objective">Secret missions</button>
+              <button data-v="capitals" title="Everyone picks a capital; hold every capital to win">Capitals</button>
             </div>
           </div>
-          <label class="field">
-            <span>Turn timer</span>
-            <select id="sel-timer">
-              <option value="0">No timer</option>
-              <option value="60">60 seconds</option>
-              <option value="90">90 seconds</option>
-              <option value="120">2 minutes</option>
-              <option value="180">3 minutes</option>
-              <option value="300">5 minutes</option>
-            </select>
-          </label>
+          <div class="settings-grid">
+            <div class="field">
+              <span>Starting territories</span>
+              <div class="seg" id="seg-start">
+                <button data-v="random">Random deal</button>
+                <button data-v="draft">Draft</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Card sets</span>
+              <div class="seg" id="seg-cards">
+                <button data-v="escalating" title="4, 6, 8, 10, 12, 15, then +5 each trade">Escalating</button>
+                <button data-v="fixed" title="Infantry 4, cavalry 6, artillery 8, mixed 10">Fixed</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <label class="field switch-field">
+              <span>Fog of war</span>
+              <span class="switch"><input type="checkbox" id="chk-fog"><span class="switch-ui"></span><span class="switch-label">Only see troops next to your land</span></span>
+            </label>
+            <label class="field">
+              <span>Turn timer</span>
+              <select id="sel-timer">
+                <option value="0">No timer</option>
+                <option value="60">60 seconds</option>
+                <option value="90">90 seconds</option>
+                <option value="120">2 minutes</option>
+                <option value="180">3 minutes</option>
+                <option value="300">5 minutes</option>
+              </select>
+            </label>
+          </div>
         </fieldset>
         <p id="lobby-hint" class="muted small"></p>
         <div class="lobby-actions">
@@ -79,8 +115,10 @@
       <div id="turn-banner" class="turn-banner"></div>
       <div class="topbar-right">
         <span id="timer" class="timer" hidden></span>
+        <button id="btn-sound" class="btn btn-ghost btn-sm" title="Sound effects on or off">Sound</button>
+        <button id="btn-alerts" class="btn btn-ghost btn-sm" title="Get a notification when it's your turn and this tab is in the background">Alerts</button>
         <button id="btn-names" class="btn btn-ghost btn-sm" title="Always show territory names (they also appear when you zoom in)">Names</button>
-        <span class="muted small">Room <strong id="game-code"></strong></span>
+        <span class="muted small room-tag">Room <strong id="game-code"></strong></span>
         <button id="btn-leave-game" class="btn btn-ghost btn-sm" title="Leave this game and go back to the start screen">Leave</button>
       </div>
     </header>
@@ -91,6 +129,7 @@
         <div id="threat-note" class="threat-note" hidden></div>
         <h2 class="rail-title">Commanders</h2>
         <ul id="player-list" class="player-list"></ul>
+        <div id="capitals-box" class="mission" hidden></div>
         <div id="mission-box" class="mission" hidden>
           <div class="mission-label">Your secret mission</div>
           <p id="mission-text"></p>
@@ -103,9 +142,17 @@
 
       <main class="board-wrap">
         <svg id="board" role="img" aria-label="World map"></svg>
+        <div id="spectator-banner" class="spectator-banner" hidden>You're watching this game</div>
         <div id="tooltip" class="tooltip" hidden></div>
+        <div id="reactions" class="reactions" role="group" aria-label="React on the map"></div>
+        <div id="replay-bar" class="replay-bar" hidden>
+          <button id="replay-play" class="btn btn-sm">Play</button>
+          <input type="range" id="replay-slider" min="0" max="0" value="0" aria-label="Replay turn">
+          <span id="replay-label" class="muted small"></span>
+          <button id="replay-close" class="btn btn-sm btn-ghost">Back to results</button>
+        </div>
         <div class="zoom-ctrl" role="group" aria-label="Map zoom">
-          <button id="zoom-in" class="btn btn-sm" title="Zoom in (or scroll)" aria-label="Zoom in">+</button>
+          <button id="zoom-in" class="btn btn-sm" title="Zoom in (or scroll / pinch)" aria-label="Zoom in">+</button>
           <button id="zoom-out" class="btn btn-sm" title="Zoom out" aria-label="Zoom out">−</button>
           <button id="zoom-fit" class="btn btn-sm" title="Show the whole world">Fit</button>
         </div>
@@ -114,7 +161,8 @@
       <aside class="rail rail-right">
         <div id="action-panel" class="panel"></div>
         <div id="dice-panel" class="dice-panel" hidden></div>
-        <div class="panel cards-panel">
+        <div id="diplo-panel" class="panel diplo-panel" hidden></div>
+        <div class="panel cards-panel" id="cards-panel">
           <div class="panel-head">
             <h2 class="rail-title">Your cards</h2>
             <span id="trade-value" class="muted small"></span>
@@ -126,6 +174,7 @@
           <h2 class="rail-title">Dispatches</h2>
           <ol id="log" class="log"></ol>
           <form id="chat-form" class="chat-form">
+            <select id="chat-to" aria-label="Send to"><option value="">Everyone</option></select>
             <input id="chat-in" maxlength="200" placeholder="Message the table" autocomplete="off">
           </form>
         </div>
@@ -133,12 +182,19 @@
     </div>
 
     <div id="gameover" class="overlay" hidden>
-      <div class="overlay-card">
+      <div class="overlay-card recap-card">
         <h2 id="go-title" class="go-title"></h2>
         <p id="go-sub" class="muted"></p>
+        <div id="go-stats" class="go-stats"></div>
+        <figure class="go-chart-wrap">
+          <figcaption class="muted small">Armies over the game</figcaption>
+          <svg id="go-chart" class="go-chart" role="img" aria-label="Armies per player over the game"></svg>
+          <div id="go-legend" class="go-legend"></div>
+        </figure>
         <ul id="go-missions" class="go-missions"></ul>
         <div class="lobby-actions">
           <button id="btn-view-board" class="btn btn-ghost">View board</button>
+          <button id="btn-replay" class="btn">Watch replay</button>
           <button id="btn-rematch" class="btn btn-brass">Back to lobby</button>
         </div>
       </div>
@@ -150,7 +206,10 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/map.js"></script>
   <script src="/shared/map-geo.js"></script>
+  <script src="/shared/odds.js"></script>
+  <script src="js/sound.js"></script>
   <script src="js/board.js"></script>
+  <script src="js/recap.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

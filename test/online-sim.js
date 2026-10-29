@@ -1,6 +1,7 @@
 // End-to-end test: starts the real server, connects socket "players" (simple bots), adds server-side
 // AI bots, and plays full games under different settings. Also checks spectators, truces and DMs.
 process.env.PORT = process.env.PORT || '3999';
+process.env.BOT_DELAY_SCALE = process.env.BOT_DELAY_SCALE || '0.03'; // run AI bots quickly in tests
 const { server } = require('../server/index');
 const { io } = require('socket.io-client');
 const { nextAction } = require('./bot');
@@ -60,8 +61,11 @@ async function playGame({ humans, bots, settings, label }) {
         if (g.phase === 'over') {
           finished = true; clearTimeout(timeout);
           const w = g.players.find((p) => p.id === g.winner);
-          clients.forEach((x) => x.s.close());
-          return resolve({ turns: g.turnNumber, actions, winner: w.name, bot: w.bot, checks, recap: !!g.recap });
+          // give late notices (a bot answers truce offers after 1.5s) time to arrive
+          return setTimeout(() => {
+            clients.forEach((x) => x.s.close());
+            resolve({ turns: g.turnNumber, actions, winner: w.name, bot: w.bot, checks, recap: !!g.recap });
+          }, 2000);
         }
         // once play starts, offer a bot a truce (it should decline)
         if (c.s === host && g.phase === 'playing' && !c.offered && bots.length) {

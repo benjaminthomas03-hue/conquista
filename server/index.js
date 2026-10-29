@@ -19,12 +19,13 @@ const COLORS = [
   { name: 'Violet', hex: '#8f5bd0' },
   { name: 'Tangerine', hex: '#e8792b' },
 ];
-const BOT_NAMES = ['Admiral Kestrel', 'General Basalt', 'Marshal Juniper', 'Captain Vex', 'Commodore Ash', 'Colonel Saffron'];
+const BOT_NAMES = ['Kestrel', 'Basalt', 'Juniper', 'Vex', 'Ash', 'Saffron'];
 const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 const REACTIONS = ['😱', '🔥', '🤝', '😂', '💀', '👀', '🎯', '🛡️'];
 const PRE_GAME_SECONDS = { draft: 30, capitals: 60, setup: 180 };
 const ROOM_IDLE_MS = 6 * 60 * 60 * 1000;
-const BOT_DELAY = { draft: 450, capitals: 600, setup: 350, playing: 700, attack: 950 };
+const BOT_SPEED = Number(process.env.BOT_DELAY_SCALE || 1); // tests set this low to run bot games fast
+const BOT_DELAY = Object.fromEntries(Object.entries({ draft: 450, capitals: 600, setup: 350, playing: 700, attack: 950 }).map(([k, v]) => [k, Math.round(v * BOT_SPEED)]));
 
 const app = express();
 app.use(compression());
@@ -263,8 +264,8 @@ io.on('connection', (socket) => {
     if (!BOT_LEVELS[level]) return reply(cb, { ok: false, error: 'Unknown difficulty' });
     if (room.players.length >= 6) return reply(cb, { ok: false, error: 'Room is full (6 players max)' });
     const free = COLORS.find((c) => !room.players.some((x) => x.color === c.hex));
-    const name = BOT_NAMES.find((n) => !room.players.some((x) => x.name.startsWith(n))) || 'Bot';
-    room.players.push({ id: newId(), token: null, name: `${name} (${BOT_LEVELS[level]})`, color: free.hex, colorName: free.name, bot: level, connected: true, socketId: null });
+    const name = BOT_NAMES.find((n) => !room.players.some((x) => x.name === n)) || 'Bot';
+    room.players.push({ id: newId(), token: null, name, color: free.hex, colorName: free.name, bot: level, connected: true, socketId: null });
     reply(cb, { ok: true });
     broadcast(room);
   });

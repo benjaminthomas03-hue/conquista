@@ -297,6 +297,7 @@ class Game {
     const idx = Object.fromEntries(this.players.map((p, i) => [p.id, i]));
     this.history.push({
       turn: this.turnNumber,
+      current: this.phase === 'playing' ? this.current.id : null,
       owners: TERR_IDS.map((t) => idx[this.territories[t].owner]),
       armies: TERR_IDS.map((t) => this.territories[t].armies),
     });

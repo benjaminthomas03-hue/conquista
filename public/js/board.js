@@ -66,13 +66,15 @@
         const ring = el('circle', { class: 'threat-ring', r: 16 }, pop);
         const circle = el('circle', { class: 'disc', r: 12, filter: 'url(#badge-shadow)' }, pop);
         const text = el('text', {}, pop);
+        // capital marker (capitals mode): a star pinned to the badge
+        const star = el('path', { class: 'capital-star', d: 'M0,-7 L2,-2.2 L7,-2.2 L3,1 L4.4,6 L0,3 L-4.4,6 L-3,1 L-7,-2.2 L-2,-2.2 Z' }, pop);
         // the badge is clickable too, which makes small islands (Iceland, Japan…) easy to hit
         for (const target of [path, badge]) {
           target.addEventListener('click', () => handlers.onClick(t.id));
           target.addEventListener('mousemove', (e) => handlers.onHover(t.id, e));
           target.addEventListener('mouseleave', () => handlers.onHover(null));
         }
-        this.nodes[t.id] = { path, circle, ring, text, badge, pop, tag, x, y, armies: null };
+        this.nodes[t.id] = { path, circle, ring, text, star, badge, pop, tag, x, y, armies: null };
       }
 
       this.contLabels = {};
@@ -131,6 +133,20 @@
       clearTimeout(cur.timer);
       cur.timer = setTimeout(() => { cur.g.classList.add('gone'); cur.outline.classList.add('gone'); }, 5000);
     },
+    // ---- emoji reactions dropped on the map ----
+    showReaction(r) {
+      const g = el('g', { class: 'fx-react', transform: `translate(${r.x},${r.y}) scale(${this.k.toFixed(3)})` }, this.gCursors);
+      const t = el('text', { class: 'fx-react-emoji', y: 0 }, g);
+      t.textContent = r.emoji;
+      const n = el('text', { class: 'fx-react-name', y: 15, fill: r.color }, g);
+      n.textContent = r.name;
+      setTimeout(() => g.remove(), 2600);
+    },
+    toBoardPoint(clientX, clientY) {
+      const pt = this.svg.createSVGPoint(); pt.x = clientX; pt.y = clientY;
+      return pt.matrixTransform(this.svg.getScreenCTM().inverse());
+    },
+
     removeCursor(id) {
       const cur = this.cursors[id]; if (!cur) return;
       cur.g.remove(); cur.outline.remove(); delete this.cursors[id];
@@ -165,8 +181,28 @@
       svg.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(Math.exp(e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
 
       let drag = null, dragged = false;
-      svg.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y }; dragged = false; });
+      // two-finger pinch on touch screens
+      const touches = new Map();
+      let pinch = null;
+      svg.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          const [a, b] = [...touches.values()];
+          pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) };
+          drag = null; dragged = true;
+          return;
+        }
+        drag = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y }; dragged = false;
+      });
       window.addEventListener('pointermove', (e) => {
+        if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinch && touches.size === 2) {
+          const [a, b] = [...touches.values()];
+          const d = Math.hypot(a.x - b.x, a.y - b.y);
+          if (d > 0 && pinch.d > 0) zoomAt(pinch.d / d, (a.x + b.x) / 2, (a.y + b.y) / 2);
+          pinch.d = d;
+          return;
+        }
         if (!drag) return;
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (!dragged && Math.hypot(dx, dy) < 5) return;
@@ -176,7 +212,9 @@
         vb.x = drag.vx - dx * scale; vb.y = drag.vy - dy * scale;
         apply();
       });
-      window.addEventListener('pointerup', () => { drag = null; });
+      const endTouch = (e) => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; drag = null; };
+      window.addEventListener('pointerup', endTouch);
+      window.addEventListener('pointercancel', endTouch);
       // a drag shouldn't also count as clicking a territory
       svg.addEventListener('click', (e) => { if (dragged) { e.stopPropagation(); dragged = false; } }, true);
 
@@ -191,13 +229,23 @@
       const colors = Object.fromEntries(players.map((p) => [p.id, p.color]));
       for (const [id, n] of Object.entries(this.nodes)) {
         const s = view.territories[id];
-        const color = colors[s.owner] || '#777';
+        const unclaimed = !s.owner;                 // draft: nobody has picked it yet
+        const fogged = s.armies == null && !unclaimed; // fog of war: owner known, troops hidden
+        const color = unclaimed ? '#55696d' : colors[s.owner] || '#777';
         // badge: owner-coloured disc, sized by troop count
-        const r = radiusFor(s.armies);
+        const r = unclaimed ? 7 : radiusFor(fogged ? 1 : s.armies);
         n.circle.setAttribute('r', r.toFixed(1));
         n.circle.setAttribute('fill', color);
         n.ring.setAttribute('r', (r + 4.5).toFixed(1));
-        n.text.textContent = s.armies > 0 ? s.armies : '…'; // 0 only while armies are moving in
+        n.text.textContent = unclaimed ? '' : fogged ? '?' : s.armies > 0 ? s.armies : '…'; // 0 only while armies are moving in
+        n.badge.classList.toggle('fogged', fogged);
+        n.badge.classList.toggle('unclaimed', unclaimed);
+        const capOwner = view.capitals && Object.keys(view.capitals).find((pid) => view.capitals[pid] === id);
+        n.star.style.display = capOwner ? '' : 'none';
+        if (capOwner) {
+          n.star.setAttribute('transform', `translate(${(r * 0.72).toFixed(1)},${(-r * 0.72).toFixed(1)}) scale(1.15)`);
+          n.star.setAttribute('fill', colors[capOwner] || '#fff');
+        }
         n.text.setAttribute('fill', textColorFor(color));
         n.text.style.fontSize = Math.max(11, r * 1.05).toFixed(1) + 'px';
         n.armies = s.armies;
