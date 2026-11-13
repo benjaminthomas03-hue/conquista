@@ -15,6 +15,7 @@ An online territory-conquest strategy game for 2–6 friends. You divide a 42-te
 
 **Players**
 - 2–6 seats, filled by friends or by **AI bots** on Easy, Normal or Hard. Hard bots chase continents, missions and capitals.
+- If a player drops out mid-game, the host can hand their seat to a **stand-in bot** (Hard). The player takes the seat back by rejoining.
 - **Spectators:** anyone who opens the link after the game has started (or clicks **Watch**) can follow along and chat.
 - **Saved games:** with a database connected, games survive server restarts and you can finish another day. Your games are listed on the start screen with a **Resume** button.
 

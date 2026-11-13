@@ -376,8 +376,8 @@
       const offline = lp && !lp.connected;
       h = pb
         ? `<h3>${esc(curr.name)}'s turn</h3><p>${esc(curr.name)} is attacking ${esc(MAP.territories[pb.to].name)}. Waiting for ${esc(playerById(pb.defender).name)} to roll.</p>`
-        : `<h3>${esc(curr.name)}'s turn</h3><p>${curr.bot ? 'Bot thinking… ' : ''}${stepText(g.step, false)}${offline ? ' They are offline.' : ''}</p>`;
-      if (offline && isHost()) h += `<button class="btn btn-sm" id="btn-skip">Skip their turn</button>`;
+        : `<h3>${esc(curr.name)}'s turn</h3><p>${curr.bot ? 'Bot thinking… ' : ''}${stepText(g.step, false)}${offline && !curr.standIn ? ' They are offline.' : ''}</p>`;
+      if (offline && isHost() && !curr.standIn) h += `<div class="row"><button class="btn btn-sm" id="btn-skip">Skip their turn</button><button class="btn btn-sm" id="btn-standin" title="A bot plays for them until they come back">Let a bot play for them</button></div>`;
     } else if (g.step === 'reinforce') {
       h = mp.cards.length >= 5
         ? `<h3>Trade in cards</h3><p>You hold ${mp.cards.length} cards. Select a set below and trade it before placing armies.</p>`
@@ -423,6 +423,7 @@
     bindRange('mv'); bindRange('fv');
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     on('btn-skip', () => emit('game:skip'));
+    on('btn-standin', () => emit('game:standIn', { id: S.game.currentPlayer }));
     on('btn-stop-battle', () => act('stopBattle'));
     P.querySelectorAll('[data-def]').forEach((b) => (b.onclick = () => {
       P.querySelectorAll('[data-def]').forEach((x) => (x.disabled = true));
@@ -573,8 +574,8 @@
       const truce = g.truces.find((t) => t.a === p.id || t.b === p.id);
       const tags = [
         p.id === S.you ? '<span class="you">you</span>' : '',
-        p.bot ? `<span class="you">${p.bot} bot</span>` : '',
-        lp && !lp.connected ? '<span class="you">offline</span>' : '',
+        p.standIn ? '<span class="you" title="A bot is playing for them until they come back">bot standing in</span>' : p.bot ? `<span class="you">${p.bot} bot</span>` : '',
+        lp && !lp.connected && !p.standIn ? '<span class="you">offline</span>' : '',
         p.betrayals ? `<span class="betray" title="Broke ${p.betrayals} truce${p.betrayals > 1 ? 's' : ''}">🗡 ${p.betrayals}</span>` : '',
       ].join('');
       const truceLine = g.truces.filter((t) => t.a === p.id || t.b === p.id).map((t) => {
@@ -587,14 +588,17 @@
       const offerBtn = canDiplo && p.alive && p.id !== S.you && !p.bot && !g.truces.some((t) => (t.a === S.you && t.b === p.id) || (t.b === S.you && t.a === p.id))
         ? `<button class="btn btn-sm btn-ghost truce-btn" data-pid="${p.id}" title="Offer ${esc(p.name)} a truce">Truce</button>` : '';
       void truce;
-      return `<li class="${cls}" data-pid="${p.id}"><div class="pname">${dot(p.color)}<span class="pn">${esc(p.name)}</span>${tags}${offerBtn}</div>
+      const standBtn = isHost() && g.phase !== 'over' && p.alive && lp && !lp.bot && !lp.connected && !p.standIn
+        ? `<button class="btn btn-sm btn-ghost truce-btn standin-btn" data-pid="${p.id}" title="Let a bot play for ${esc(p.name)} until they come back">Use bot</button>` : '';
+      return `<li class="${cls}" data-pid="${p.id}"><div class="pname">${dot(p.color)}<span class="pn">${esc(p.name)}</span>${tags}${standBtn || offerBtn}</div>
         <div class="stats">${stats}</div>${truceLine ? `<div class="truces">${truceLine}</div>` : ''}</li>`;
     }).join('');
     $('player-list').querySelectorAll('li').forEach((li) => {
       li.onmouseenter = () => { S.ui.focus = li.dataset.pid; Board.update(S.game, S.game.players, boardUi()); };
       li.onmouseleave = () => { S.ui.focus = null; Board.update(S.game, S.game.players, boardUi()); };
     });
-    $('player-list').querySelectorAll('.truce-btn').forEach((b) => (b.onclick = (e) => {
+    $('player-list').querySelectorAll('.standin-btn').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); emit('game:standIn', { id: b.dataset.pid }); }));
+    $('player-list').querySelectorAll('.truce-btn:not(.standin-btn)').forEach((b) => (b.onclick = (e) => {
       e.stopPropagation();
       S.ui.truceFor = b.dataset.pid; renderDiplomacy();
     }));

@@ -763,7 +763,7 @@ class Game {
       gameId: this.gameId,
       recap: over ? { history: this.history, stats: this.stats, territoryOrder: TERR_IDS } : undefined,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, color: p.color, colorName: p.colorName, alive: p.alive, bot: p.bot,
+        id: p.id, name: p.name, color: p.color, colorName: p.colorName, alive: p.alive, bot: p.bot, standIn: !!p.standIn,
         betrayals: p.betrayals,
         cardCount: p.cards.length,
         territoryCount: this.ownedIds(p.id).length,

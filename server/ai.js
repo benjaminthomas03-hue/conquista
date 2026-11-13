@@ -157,6 +157,32 @@ function bestStaging(g, c, pid) {
   return best;
 }
 
+// Where the next batch of starting armies does the most good.
+function setupSpot(g, c, pid) {
+  const { T, border, mine, targets, myCapital, pressure, L } = c;
+  if (!border.length) return mine[0];
+  const staging = bestStaging(g, c, pid);
+  let best = border[0], bestScore = -Infinity;
+  // the capital always gets a garrison, even when it sits behind our lines
+  const spots = myCapital && T[myCapital].owner === pid && !border.includes(myCapital) ? border.concat(myCapital) : border;
+  for (const t of spots) {
+    const cont = MAP.territories[t].continent;
+    const ids = MAP.continentTerritories[cont];
+    const share = ids.filter((x) => T[x].owner === pid).length / ids.length;
+    let v = 1;
+    if (t === staging) v += 2.2 * L.focus;                       // the strike force
+    if (targets.has(cont)) v += 1.2 + share * 1.5;               // borders of the continents we are going for
+    v += Math.min(3, Math.max(0, pressure(t))) * 0.5;            // a bigger enemy stack next door
+    v += Math.min(3, c.enemyNbrs(t).length) * 0.15;              // exposed on several sides
+    if (t === myCapital) v += 3;
+    v += c.threat.defend[t] || 0;
+    // diminishing returns, so it doesn't all pile up in one place (the strike force fades more slowly)
+    const score = v / (1 + T[t].armies * (t === staging ? 0.55 - 0.3 * L.focus : 0.55));
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  return best;
+}
+
 function botAction(g, pid, level) {
   const c = ctx(g, pid, level);
   const { L, T, mine, border, rnd, pick } = c;
@@ -189,13 +215,15 @@ function botAction(g, pid, level) {
     return ['capital', { territory: mine.slice().sort((a, b) => score(b) - score(a))[0] }];
   }
 
-  // ----- setup: place starting armies in a few chunks -----
+  // ----- setup: spread the starting armies like a person would -----
+  // A strike force on the best attacking spot, the rest shared along the borders that matter:
+  // every extra army on a territory is worth a little less than the one before it.
   if (g.phase === 'setup') {
     const left = g.setupRemaining[pid];
     if (!left) return null;
-    const n = Math.min(left, Math.max(3, Math.ceil(left / 3)));
-    const where = rnd() < L.randomness ? pick(border.length ? border : mine) : bestStaging(g, c, pid);
-    return ['placeSetup', { territory: where, count: n }];
+    const n = left <= 4 ? left : Math.max(3, Math.ceil(left / 4));
+    if (rnd() < L.randomness) return ['placeSetup', { territory: pick(border.length ? border : mine), count: Math.min(n, 3) }];
+    return ['placeSetup', { territory: setupSpot(g, c, pid), count: n }];
   }
 
   if (g.phase !== 'playing' || g.current.id !== pid) return null;

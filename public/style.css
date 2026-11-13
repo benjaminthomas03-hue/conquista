@@ -475,3 +475,8 @@ input::placeholder { color: #6f8c8a; }
   .zoom-ctrl { flex-direction: row; justify-self: end; gap: 4px; }
   .zoom-ctrl .btn { min-width: 34px; }
 }
+
+/* long bot names: keep the name whole and let the tags drop to the next line */
+.player-list .pname { flex-wrap: wrap; row-gap: 0; }
+.player-list .pname .pn { max-width: calc(100% - 22px); }
+.player-list .pname .you { white-space: nowrap; }
