@@ -5,7 +5,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/engine-sim.js 100 && node test/online-sim.js",
+    "test": "node test/engine-sim.js 100 && node test/online-sim.js && node test/standin-test.js",
     "build:map": "node tools/build-map.js"
   },
   "engines": {

@@ -19,7 +19,17 @@ const COLORS = [
   { name: 'Violet', hex: '#8f5bd0' },
   { name: 'Tangerine', hex: '#e8792b' },
 ];
-const BOT_NAMES = ['Kestrel', 'Basalt', 'Juniper', 'Vex', 'Ash', 'Saffron'];
+// Bots draw a random name each game.
+const BOT_NAMES = [
+  'General Mayhem', 'Major Bluff', 'Captain Dicey', 'Major Setback', 'General Chaos', 'Captain Obvious',
+  'Sergeant Sixes', 'Major Drama', 'General Nuisance', 'Colonel Kernel', 'Baron Von Roll', 'Marshal Law',
+  'Major Pain', 'Admiral Bluster', 'Captain Chaos', 'Sergeant Snake-Eye', 'Colonel Panic', 'Major Oops',
+  'General Idea', 'Count Yourdice', 'Major Regret', 'General Disarray', 'Captain Backstab', 'Sergeant Stubborn',
+  'Colonel Overkill', 'Admiral Tantrum', 'Major Gamble', 'General Havoc', 'Captain Turtle', 'Marshal Mellow',
+  'Major Blitz', 'Baroness Boom', 'Corporal Clumsy', 'Admiral Overboard', 'Duchess Doubles', 'General Delay',
+  'Captain Lastroll', 'Lieutenant Lucky', 'Brigadier Bold', 'Private Mischief', 'Commodore Calm', 'Field Marshal Fog',
+];
+const STAND_IN_LEVEL = 'hard'; // a bot that plays for a human who left mid-game
 const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 const REACTIONS = ['😱', '🔥', '🤝', '😂', '💀', '👀', '🎯', '🛡️'];
 const PRE_GAME_SECONDS = { draft: 30, capitals: 60, setup: 180 };
@@ -92,7 +102,7 @@ function lobbyView(room) {
     deadline: room.deadline,
     defendDeadline: room.defendDeadline || null,
     saving: store.enabled,
-    players: room.players.map((p) => ({ id: p.id, name: p.name, color: p.color, colorName: p.colorName, connected: p.connected, bot: p.bot || null })),
+    players: room.players.map((p) => ({ id: p.id, name: p.name, color: p.color, colorName: p.colorName, connected: p.connected, bot: p.bot || null, standIn: !!(room.game && (room.game.player(p.id) || {}).standIn) })),
     spectators: room.spectators.map((s) => ({ id: s.id, name: s.name })),
   };
 }
@@ -229,6 +239,12 @@ io.on('connection', (socket) => {
     p.connected = true;
     socket.join(r.code);
     if (asSpectator) return;
+    // a returning player takes their seat back from the stand-in bot
+    const gp = r.game && r.game.player(p.id);
+    if (gp && gp.standIn) {
+      gp.standIn = false; gp.bot = null;
+      r.game.addLog(`${p.name} is back and takes over from the bot.`);
+    }
     // if the current host is offline, whoever comes back takes over hosting
     const host = r.players.find((x) => x.id === r.hostId);
     if (!host || !host.connected || host.bot) r.hostId = p.id;
@@ -313,7 +329,8 @@ io.on('connection', (socket) => {
     if (!BOT_LEVELS[level]) return reply(cb, { ok: false, error: 'Unknown difficulty' });
     if (room.players.length >= 6) return reply(cb, { ok: false, error: 'Room is full (6 players max)' });
     const free = COLORS.find((c) => !room.players.some((x) => x.color === c.hex));
-    const name = BOT_NAMES.find((n) => !room.players.some((x) => x.name === n)) || 'Bot';
+    const freeNames = BOT_NAMES.filter((n) => !room.players.some((x) => x.name === n));
+    const name = freeNames[Math.floor(Math.random() * freeNames.length)] || 'Bot';
     room.players.push({ id: newId(), token: null, name, color: free.hex, colorName: free.name, bot: level, connected: true, socketId: null });
     reply(cb, { ok: true });
     broadcast(room);
@@ -365,6 +382,7 @@ io.on('connection', (socket) => {
       if (!r.players.some((p) => !p.bot)) { rooms.delete(r.code); store.remove(r.code); }
     } else {
       me.connected = false; me.socketId = null;
+      if (r.hostId === me.id) { const h = r.players.find((p) => p.connected && !p.bot); if (h) r.hostId = h.id; }
     }
     socket.leave(r.code);
     room = null; me = null; spectating = false;
@@ -379,6 +397,19 @@ io.on('connection', (socket) => {
     catch (e) { console.error(e); res = { ok: false, error: 'Server error' }; }
     reply(cb, res);
     if (res.ok) afterAction(room);
+  });
+
+  socket.on('game:standIn', ({ id } = {}, cb) => {
+    // host can hand an offline player's seat to a bot; the player takes it back by rejoining
+    const g = room && room.game;
+    if (!g || g.phase === 'over' || !isHost()) return reply(cb, { ok: false, error: 'Only the host can do that' });
+    const p = room.players.find((x) => x.id === id), gp = g.player(id);
+    if (!p || !gp || p.bot || gp.standIn || !gp.alive) return reply(cb, { ok: false, error: 'That seat can\'t be handed to a bot' });
+    if (p.connected) return reply(cb, { ok: false, error: `${p.name} is online` });
+    gp.bot = STAND_IN_LEVEL; gp.standIn = true;
+    g.addLog(`${p.name} is away, so a bot is playing for them until they return.`);
+    reply(cb, { ok: true });
+    afterAction(room);
   });
 
   socket.on('game:skip', (_ = {}, cb) => {
